@@ -1,0 +1,16 @@
+name: Terraform doc generator
+
+on:
+  workflow_call:
+
+jobs:
+  terraform-module-readme-generator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Render terraform docs and push changes back to PR
+        uses: terraform-docs/gh-actions@main
+        with:
+          git-push: "true"
