@@ -1,0 +1,32 @@
+name: Iac code scanning
+
+on:
+  workflow_call:
+    inputs:
+      enable_code_test:
+        description: "Enable snyk code test"
+        type: boolean
+        default: true
+      code_test_severity_threshold:
+        description: "Severity threshold for IaC scanning. Acceptable values: low | medium | high"
+        type: string
+        default: "high"
+    secrets:
+      snyk_token:
+        description: "Snyk token"
+        required: true
+
+jobs:
+  code_test:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.enable_code_test }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Node snyk vulnerability scanning code test
+        uses: snyk/actions/iac@0.4.0
+        with:
+          command: iac test
+          args: --severity-threshold=${{ inputs.code_test_severity_threshold }}
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
