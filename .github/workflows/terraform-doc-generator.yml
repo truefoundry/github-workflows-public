@@ -2,15 +2,25 @@ name: Terraform doc generator
 
 on:
   workflow_call:
-
+    inputs:
+      commit_ref:
+        description: "Commit ref where the readme action should update"
+        type: string
+        required: true
+      git_push:
+        description: "Allow document changes to be pushed to commit_ref"
+        type: string
+        default: "true"
 jobs:
   terraform-module-readme-generator:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_ref }}
       
       - name: Render terraform docs and push changes back to PR
         uses: terraform-docs/gh-actions@main
         with:
-          git-push: "true"
+          git-push: ${{ inputs.git_push }}
