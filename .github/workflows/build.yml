@@ -1,0 +1,161 @@
+# Workflow name
+name: Build and push container images to Artifactory
+
+# Trigger on workflow_call
+on:
+  workflow_call:
+    inputs:
+      artifactory_registry_url:
+        description: 'Registry URL for JFrog Artifactory e.g tfy.jfrog.io'
+        required: true
+        type: string
+      artifactory_repository_url:
+        description: 'Repository url for JFrog Artifactory e.g tfy.jfrog.io/tfy-images'
+        required: true
+        type: string
+      image_artifact_name:
+        description: 'Name of the image artifact, usually the repository name e.g mlfoundry-server'
+        required: true
+        type: string
+      image_tag:
+        description: 'Image tag for the image to be pushed'
+        required: true
+        type: string
+      extra_image_tag:
+        description: 'Extra image tags for the image to be pushed (array)'
+        required: false
+        type: string
+      image_context:
+        description: 'Context for the image to be built'
+        required: false
+        type: string
+        default: '.'
+      enable_scan:
+        description: 'Enable image scanning'
+        required: false
+        type: boolean
+        default: true
+      dockerfile_path:
+        description: 'Dockerfile for the image to be built'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      image_build_args:
+        description: 'Build arguments for the image to be built'
+        required: false
+        type: string
+      free_disk_space:
+        description: 'Free disk space on the runner'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      artifactory_username:
+        description: 'Username for JFrog Artifactory'
+        required: true
+      artifactory_password:
+        description: 'Password for JFrog Artifactory'
+        required: true
+
+# Jobs
+jobs:
+  build:
+    name: Build and Push Image to JFrog Artifactory
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_ARTIFACT_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        if: ${{ inputs.free_disk_space }}
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to JFrog Artifactory
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.artifactory_username }}
+          password: ${{ secrets.artifactory_password }}
+          registry: ${{ inputs.artifactory_registry_url }}
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        if: ${{ inputs.enable_scan }}
+        with:
+          push: false
+          load: true
+          file: ${{ inputs.dockerfile_path }}
+          context: ${{ inputs.image_context }}
+          platforms: linux/amd64 # arm intentionally excluded
+          tags: |
+            ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
+          cache-from: type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
+          cache-to: mode=max,image-manifest=true,type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
+          build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
+
+      - name: Scan image
+        uses: anchore/scan-action@v3
+        if: ${{ inputs.enable_scan }}
+        with:
+          image: ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: table
+
+      - name: Parse extra image tags input
+        id: parse_tags
+        env:
+          IMAGE_ARTIFACT_URL: ${{ env.IMAGE_ARTIFACT_URL }}
+        run: |
+          echo "Extra image tags: ${{ inputs.extra_image_tag }}"
+          if [ -z "${{ inputs.extra_image_tag }}" ]; then
+            echo "No extra image tags provided."
+            echo "extra_tags=" >> $GITHUB_ENV
+          else
+            # Initialize variable
+            EXTRA_TAGS=""
+            # Read the extra_image_tag input line by line
+            while IFS= read -r line; do
+              # Strip any leading/trailing quotes
+              line=$(echo "$line" | sed 's/^"//;s/"$//')
+              if [ -n "$line" ]; then
+                TAG="$IMAGE_ARTIFACT_URL:$line"
+                EXTRA_TAGS="$EXTRA_TAGS$TAG"$'\n'
+              fi
+            done <<< "${{ inputs.extra_image_tag }}"
+            echo "Parsed extra tags:"
+            echo "$EXTRA_TAGS"
+            # Use '<<EOF' syntax to handle multiline values
+            echo "extra_tags<<EOF" >> $GITHUB_ENV
+            echo "$EXTRA_TAGS" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+          fi
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          provenance: false
+          file: ${{ inputs.dockerfile_path }}
+          context: ${{ inputs.image_context }}
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
+            ${{ env.extra_tags }}
+          cache-from: type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
+          cache-to: mode=max,image-manifest=true,type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
