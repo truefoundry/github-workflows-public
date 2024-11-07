@@ -109,7 +109,7 @@ jobs:
           build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
 
       - name: Scan image
-        uses: anchore/scan-action@v3
+        uses: anchore/scan-action@v5
         if: ${{ inputs.enable_scan }}
         with:
           image: ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
