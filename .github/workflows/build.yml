@@ -40,6 +40,11 @@ on:
         required: false
         type: boolean
         default: true
+      image_scan_severity_cutoff:
+        description: 'Severity cutoff for image scanning'
+        required: false
+        type: string
+        default: 'high'
       dockerfile_path:
         description: 'Dockerfile for the image to be built'
         required: false
@@ -119,7 +124,7 @@ jobs:
         with:
           image: ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
           fail-build: true
-          severity-cutoff: high
+          severity-cutoff: ${{ inputs.image_scan_severity_cutoff }}
           output-format: table
 
       - name: Parse extra image tags input
