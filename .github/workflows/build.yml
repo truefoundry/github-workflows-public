@@ -6,65 +6,65 @@ on:
   workflow_call:
     inputs:
       artifactory_registry_url:
-        description: 'Registry URL for JFrog Artifactory e.g tfy.jfrog.io'
+        description: "Registry URL for JFrog Artifactory e.g tfy.jfrog.io"
         required: true
         type: string
       artifactory_repository_url:
-        description: 'Repository url for JFrog Artifactory e.g tfy.jfrog.io/tfy-images'
+        description: "Repository url for JFrog Artifactory e.g tfy.jfrog.io/tfy-images"
         required: true
         type: string
       image_artifact_name:
-        description: 'Name of the image artifact, usually the repository name e.g mlfoundry-server'
+        description: "Name of the image artifact, usually the repository name e.g mlfoundry-server"
         required: true
         type: string
       image_tag:
-        description: 'Image tag for the image to be pushed'
+        description: "Image tag for the image to be pushed"
         required: true
         type: string
       extra_image_tag:
-        description: 'Extra image tags for the image to be pushed (array)'
+        description: "Extra image tags for the image to be pushed (array)"
         required: false
         type: string
       image_context:
-        description: 'Context for the image to be built'
+        description: "Context for the image to be built"
         required: false
         type: string
-        default: '.'
+        default: "."
       platforms:
-        description: 'Platforms for the image to be built'
+        description: "Platforms for the image to be built"
         required: false
         type: string
-        default: 'linux/amd64,linux/arm64'
+        default: "linux/amd64,linux/arm64"
       enable_scan:
-        description: 'Enable image scanning'
+        description: "Enable image scanning"
         required: false
         type: boolean
         default: true
       image_scan_severity_cutoff:
-        description: 'Severity cutoff for image scanning'
+        description: "Severity cutoff for image scanning"
         required: false
         type: string
-        default: 'high'
+        default: "high"
       dockerfile_path:
-        description: 'Dockerfile for the image to be built'
+        description: "Dockerfile for the image to be built"
         required: false
         type: string
-        default: 'Dockerfile'
+        default: "Dockerfile"
       image_build_args:
-        description: 'Build arguments for the image to be built'
+        description: "Build arguments for the image to be built"
         required: false
         type: string
       free_disk_space:
-        description: 'Free disk space on the runner'
+        description: "Free disk space on the runner - false | true | aggressive"
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: "false"
     secrets:
       artifactory_username:
-        description: 'Username for JFrog Artifactory'
+        description: "Username for JFrog Artifactory"
         required: true
       artifactory_password:
-        description: 'Password for JFrog Artifactory'
+        description: "Password for JFrog Artifactory"
         required: true
 
 # Jobs
@@ -76,16 +76,16 @@ jobs:
       IMAGE_ARTIFACT_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
     steps:
       - name: Free Disk Space (Ubuntu)
-        if: ${{ inputs.free_disk_space }}
+        if: ${{ inputs.free_disk_space != 'false' }}
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: false
           android: true
           dotnet: true
           haskell: true
-          large-packages: false
-          docker-images: false
-          swap-storage: false
+          large-packages: ${{ inputs.free_disk_space == 'aggressive' }}
+          docker-images: ${{ inputs.free_disk_space == 'aggressive' }}
+          swap-storage: ${{ inputs.free_disk_space == 'aggressive' }}
 
       - name: Checkout code
         uses: actions/checkout@v4
