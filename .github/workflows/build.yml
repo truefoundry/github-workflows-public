@@ -111,7 +111,7 @@ jobs:
           load: true
           file: ${{ inputs.dockerfile_path }}
           context: ${{ inputs.image_context }}
-          platforms: linux/amd64 # arm intentionally excluded
+          platforms: linux/amd64 # arm intentionally excluded since we can do with just amd for scan image action
           tags: |
             ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
           cache-from: type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
