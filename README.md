@@ -65,7 +65,6 @@ This workflow requires:
 ```yaml
 permissions:
   contents: write          # to push changes and open PRs
-  id-token: write (optional) # if using OIDC for cloud auth
 ```
 
 Also ensure your caller passes a token (e.g. `workflow_repo_token`) with write rights to the target repo.
@@ -84,15 +83,6 @@ Also ensure your caller passes a token (e.g. `workflow_repo_token`) with write r
 6. **Revert** `.grype.yaml` back to the original path (if custom).
 7. **Install** Python deps and run `get-vulnerabilities.py` to update the ignore list in your config file.
 8. **Diff** the config file; if changed, **open** a PR using `peter-evans/create-pull-request@v5`.
-
----
-
-## Customization
-
-* **Scheduling**: call this from a separate workflow with a `schedule` trigger to automate daily or weekly updates.
-* **Severity cutoff**: adjust `image_scan_severity_cutoff` to `medium`, `low`, etc., as needed.
-* **Fail-fast**: set `grype_fail_build: true` to break the pipeline on critical findings.
-* **Scripts path**: if you move `get-vulnerabilities.py`, update the `pip install` and script invocation paths.
 
 ---
 
