@@ -1,0 +1,136 @@
+# Workflow name
+name: Update Grype Ignore File
+
+# Trigger on workflow_call
+on:
+  workflow_call:
+    inputs:
+      artifactory_repository_url:
+        description: 'Repository url for JFrog Artifactory e.g tfy.jfrog.io/tfy-images'
+        required: true
+        type: string
+      dockerfile_path:
+        description: 'Dockerfile for the image to be built'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      image_artifact_name:
+        description: 'Name of the image artifact, usually the repository name e.g mlfoundry-server'
+        required: true
+        type: string
+      image_build_args:
+        description: 'Build arguments for the image to be built'
+        required: false
+        type: string
+      image_context:
+        description: 'Context for the image to be built'
+        required: false
+        type: string
+        default: '.'
+      image_scan_severity_cutoff:
+        description: 'Severity cutoff for image scanning'
+        required: false
+        type: string
+        default: 'critical'
+      grype_fail_build:
+        description: 'Fail build if grype scan fails'
+        required: false
+        type: boolean
+        default: false
+      grype_output_file:
+        description: 'Output file for grype scan'
+        required: false
+        type: string
+        default: 'vulnerability-report.json'
+      grype_output_format:
+        description: 'Report output format for the image scan (json, table, cyclonedx, etc.)'
+        required: false
+        type: string
+        default: 'json'
+
+permissions:
+  contents: write
+
+# Runs image scan and generates a report ✅
+# Run script to update .grype.yaml ✅
+# Tag repo owners
+# Commit and create PR ✅
+# Jobs
+jobs:
+  build:
+    name: Build Image for Grype Report
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_ARTIFACT_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout truefoundry/github-workflows-public
+        uses: actions/checkout@v4
+        with:
+          repository: truefoundry/github-workflows-public
+          ref: 'add-vul-report'
+          path: workflows
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Build and Load Docker image using Docker Buildx
+        uses: docker/build-push-action@v6
+        with:
+          load: true
+          file: ${{ inputs.dockerfile_path }}
+          context: ${{ inputs.image_context }}
+          platforms: linux/amd64
+          provenance: false
+          tags: |
+            ${{ env.IMAGE_ARTIFACT_URL }}:grype-report
+          build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
+
+      - name: Scan image
+        uses: anchore/scan-action@v6
+        with:
+          image: ${{ env.IMAGE_ARTIFACT_URL }}:grype-report
+          fail-build: ${{ inputs.grype_fail_build }}
+          severity-cutoff: ${{ inputs.image_scan_severity_cutoff }}
+          output-format: ${{ inputs.grype_output_format }}
+          output-file: ${{ inputs.grype_output_file }}
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r workflows/.github/scripts/requirements.txt
+
+      - name: Update grype ignore list
+        run: |
+          echo "Updating grype ignore list"
+          cat ${{ inputs.grype_output_file }}
+          python workflows/.github/scripts/get-vulnerabilities.py -o ${{ inputs.grype_output_file }} -s ${{ inputs.image_scan_severity_cutoff }} 
+
+      - name: Check if grype.yaml changed
+        id: grype_updated
+        run: |
+          if git diff --quiet .grype.yaml; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.grype_updated.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: '[CI] Update grype ignore list'
+          branch: update-grype-list-${{ github.run_id }}
+          base: main
+          add-paths: |
+            .grype.yaml
+          title: '[CI] Update grype ignore list'
+          token: ${{ secrets.workflow_repo_token }}
+          delete-branch: true
