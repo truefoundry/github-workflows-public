@@ -37,6 +37,11 @@ on:
         required: false
         type: boolean
         default: false
+      grype_config_file:
+        description: 'Grype config file for the image scan'
+        required: false
+        type: string
+        default: '.grype.yaml'
       grype_output_file:
         description: 'Output file for grype scan'
         required: false
@@ -93,6 +98,23 @@ jobs:
             ${{ env.IMAGE_ARTIFACT_URL }}:grype-report
           build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
 
+      - name: Check grype.yaml config file input
+        run: |
+          if [ "${{ inputs.grype_config_file }}" != ".grype.yaml" ]; then
+            if [ -f "${{ inputs.grype_config_file }}" ]; then
+              echo "Moving custom grype config file to .grype.yaml"
+              mv "${{ inputs.grype_config_file }}" .grype.yaml
+            else
+              echo "Custom grype config file '${{ inputs.grype_config_file }}' not found, creating empty .grype.yaml"
+              touch .grype.yaml
+            fi
+          else
+            if [ ! -f ".grype.yaml" ]; then
+              echo ".grype.yaml not found, creating empty .grype.yaml"
+              touch .grype.yaml
+            fi
+          fi
+
       - name: Scan image
         uses: anchore/scan-action@v6
         with:
@@ -101,6 +123,13 @@ jobs:
           severity-cutoff: ${{ inputs.image_scan_severity_cutoff }}
           output-format: ${{ inputs.grype_output_format }}
           output-file: ${{ inputs.grype_output_file }}
+
+      - name: revert .grype.yaml to original
+        run: |
+          if [ "${{ inputs.grype_config_file }}" != ".grype.yaml" ]; then
+            echo "Reverting .grype.yaml to original"
+            mv .grype.yaml "${{ inputs.grype_config_file }}"
+          fi
 
       - name: Install python dependencies
         run: |
@@ -111,12 +140,12 @@ jobs:
         run: |
           echo "Updating grype ignore list"
           cat ${{ inputs.grype_output_file }}
-          python workflows/.github/scripts/get-vulnerabilities.py -o ${{ inputs.grype_output_file }} -s ${{ inputs.image_scan_severity_cutoff }} 
+          python workflows/.github/scripts/get-vulnerabilities.py -c ${{ inputs.grype_config_file }} -o ${{ inputs.grype_output_file }} -s ${{ inputs.image_scan_severity_cutoff }} 
 
       - name: Check if grype.yaml changed
         id: grype_updated
         run: |
-          if git diff --quiet .grype.yaml; then
+          if git diff --quiet ${{ inputs.grype_config_file }}; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
             echo "changed=true" >> $GITHUB_OUTPUT
@@ -130,7 +159,7 @@ jobs:
           branch: update-grype-list-${{ github.run_id }}
           base: main
           add-paths: |
-            .grype.yaml
+            ${{ inputs.grype_config_file }}
           title: '[CI] Update grype ignore list'
           token: ${{ secrets.workflow_repo_token }}
           delete-branch: true
