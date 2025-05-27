@@ -13,9 +13,8 @@ on:
         type: string
       artifactory_repository_url:
         description: 'Target registry for the image to be mirrored e.g docker.io'
-        required: false
+        required: true
         type: string
-        default: 'tfy.jfrog.io/tfy-images'
       platforms:
         description: 'Platforms for the image to be mirrored'
         required: false
@@ -26,7 +25,13 @@ on:
         required: false
         type: boolean
         default: false
-    secrets: {}
+    secrets:
+      artifactory_username:
+        description: 'Artifactory username'
+        required: true
+      artifactory_password:
+        description: 'Artifactory password'
+        required: true
 
 jobs:
   build:
