@@ -1,0 +1,4 @@
+future==1.0.0
+pyjson==1.4.1
+PyYAML==6.0.2
+typing==3.7.4.3

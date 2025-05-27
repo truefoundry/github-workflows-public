@@ -39,7 +39,7 @@ on:
         description: 'Enable image scanning'
         required: false
         type: boolean
-        default: true
+        default: false
       image_scan_severity_cutoff:
         description: 'Severity cutoff for image scanning'
         required: false
