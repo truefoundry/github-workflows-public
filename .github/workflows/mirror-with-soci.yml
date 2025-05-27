@@ -1,0 +1,104 @@
+name: Mirror image with SOCI index
+
+on:
+  workflow_call:
+    inputs:
+      source_registry:
+        description: 'Source registry for the image to be mirrored e.g docker.io'
+        required: true
+        type: string
+      source_image:
+        description: 'Image URI for the image to be mirrored e.g a/b:tag'
+        required: true
+        type: string
+      artifactory_repository_url:
+        description: 'Target registry for the image to be mirrored e.g docker.io'
+        required: true
+        type: string
+      platforms:
+        description: 'Platforms for the image to be mirrored'
+        required: false
+        type: string
+        default: 'linux/amd64'
+      free_disk_space:
+        description: 'Free disk space on the runner'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      artifactory_username:
+        description: 'Artifactory username'
+        required: true
+      artifactory_password:
+        description: 'Artifactory password'
+        required: true
+
+jobs:
+  build:
+    defaults:
+      run:
+        shell: bash
+    name: Build and Push Image to JFrog Artifactory
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_ARTIFACT_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        if: ${{ inputs.free_disk_space }}
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: false
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+    
+      - name: Download containerd and nerdctl
+        run: |
+          cd /tmp
+
+          mkdir -p /tmp/containerd
+          curl -L -o containerd.tar.gz https://github.com/containerd/containerd/releases/download/v2.1.1/containerd-2.1.1-linux-amd64.tar.gz
+          tar -C /tmp/containerd -xzf containerd.tar.gz
+          chmod +x /tmp/containerd/bin/*
+          sudo cp /tmp/containerd/bin/* /usr/local/bin/
+
+          mkdir -p /tmp/nerdctl
+          curl -L -o nerdctl.tar.gz https://github.com/containerd/nerdctl/releases/download/v2.1.2/nerdctl-2.1.2-linux-amd64.tar.gz
+          tar -C /tmp/nerdctl -xzf nerdctl.tar.gz
+          chmod +x /tmp/nerdctl/*
+          sudo cp /tmp/nerdctl/* /usr/local/bin/
+
+      - name: Login to artifactory_repository_url as current user and root
+        run: |
+          # needed for pushing images / SOCI indexes which run as the current user
+          echo ${{ secrets.artifactory_password }} | nerdctl login -u ${{ secrets.artifactory_username }} --password-stdin ${{ inputs.artifactory_repository_url }}
+          # needed the SOCI snapshotter which runs as root
+          echo ${{ secrets.artifactory_password }} | sudo nerdctl login -u ${{ secrets.artifactory_username }} --password-stdin ${{ inputs.artifactory_repository_url }}
+
+      - name: Download soci-snapshotter
+        run: |
+          cd /tmp
+
+          mkdir -p /tmp/soci-snapshotter
+          curl -L -o soci-snapshotter.tar.gz https://github.com/awslabs/soci-snapshotter/releases/download/v0.9.0/soci-snapshotter-0.9.0-linux-amd64-static.tar.gz
+          tar -C /tmp/soci-snapshotter -xzf soci-snapshotter.tar.gz
+          chmod +x /tmp/soci-snapshotter/soci
+          chmod +x /tmp/soci-snapshotter/soci-snapshotter-grpc
+          sudo cp /tmp/soci-snapshotter/soci /usr/local/bin/
+          sudo cp /tmp/soci-snapshotter/soci-snapshotter-grpc /usr/local/bin/
+          sudo soci --help
+
+      - name: Mirror image with SOCI index
+        run: |
+          IFS=',' read -ra PLATFORMS <<< "${{ inputs.platforms }}"
+          for platform in "${PLATFORMS[@]}"; do
+            sudo nerdctl pull --platform $platform "${{ inputs.source_registry }}/${{ inputs.source_image }}"
+            sudo nerdctl image tag "${{ inputs.source_registry }}/${{ inputs.source_image }}" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
+            sudo nerdctl push --platform $platform --snapshotter soci "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
+          done
