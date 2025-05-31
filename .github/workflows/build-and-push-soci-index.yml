@@ -117,7 +117,7 @@ jobs:
           IFS=',' read -ra PLATFORMS <<< "${{ inputs.platforms }}"
           for platform in "${PLATFORMS[@]}"; do
             echo "Pulling image for platform: $platform"
-            sudo nerdctl pull --platform $platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}" >/dev/null
+            sudo nerdctl pull --quiet --platform $platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
             echo "Pushing soci index for platform: $platform"
             sudo soci create --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
             sudo soci push --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
