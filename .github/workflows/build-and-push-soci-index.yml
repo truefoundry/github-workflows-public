@@ -1,20 +1,29 @@
-name: Mirror x86 image with SOCI index
+name: Build and push SOCI index
 
 on:
   workflow_call:
     inputs:
-      source_registry:
-        description: 'Source registry for the image to be mirrored e.g docker.io'
-        required: true
-        type: string
-      source_image:
-        description: 'Image URI for the image to be mirrored e.g a/b:tag'
+      artifactory_registry_url:
+        description: 'Registry URL for JFrog Artifactory e.g tfy.jfrog.io'
         required: true
         type: string
       artifactory_repository_url:
-        description: 'Target registry for the image to be mirrored e.g docker.io'
+        description: 'Repository url for JFrog Artifactory e.g tfy.jfrog.io/tfy-images'
         required: true
         type: string
+      image_artifact_name:
+        description: 'Name of the image artifact, usually the repository name e.g mlfoundry-server'
+        required: true
+        type: string
+      image_tag:
+        description: 'Image tag for the image to be pushed'
+        required: true
+        type: string
+      platforms:
+        description: 'Platforms for the image to be mirrored'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
       free_disk_space:
         description: 'Free disk space on the runner'
         required: false
@@ -48,10 +57,10 @@ jobs:
     defaults:
       run:
         shell: bash
-    name: Build and Push Image to JFrog Artifactory
+    name: Build and Push SOCI Index to JFrog Artifactory
     runs-on: ubuntu-latest
     env:
-      IMAGE_ARTIFACT_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}
+      IMAGE_ARTIFACT_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
     steps:
       - name: Free Disk Space (Ubuntu)
         if: ${{ inputs.free_disk_space }}
@@ -63,11 +72,10 @@ jobs:
           large-packages: ${{ inputs.free_disk_space_large_packages }}
           docker-images: ${{ inputs.free_disk_space_docker_images }}
           tool-cache: ${{ inputs.free_disk_space_tool_cache_storage }}
-          swap-storage: false
 
       - name: Checkout code
         uses: actions/checkout@v4
-    
+
       - name: Download containerd and nerdctl
         run: |
           cd /tmp
@@ -104,8 +112,15 @@ jobs:
           sudo cp /tmp/soci-snapshotter/soci-snapshotter-grpc /usr/local/bin/
           sudo soci --help
 
-      - name: Mirror image with SOCI index
+      - name: Build and Push SOCI index
         run: |
-          sudo nerdctl pull --platform "linux/amd64" "${{ inputs.source_registry }}/${{ inputs.source_image }}"
-          sudo nerdctl image tag "${{ inputs.source_registry }}/${{ inputs.source_image }}" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
-          sudo nerdctl push --platform "linux/amd64" --snapshotter soci "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
+          IFS=',' read -ra PLATFORMS <<< "${{ inputs.platforms }}"
+          for platform in "${PLATFORMS[@]}"; do
+            echo "Pulling image for platform: $platform"
+            sudo nerdctl pull --platform $platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+            echo "Pushing soci index for platform: $platform"
+            sudo soci create --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+            sudo soci push --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+            echo "Removing image for platform: $platform"
+            sudo nerdctl rmi "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+          done
