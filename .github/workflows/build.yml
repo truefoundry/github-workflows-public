@@ -59,6 +59,21 @@ on:
         required: false
         type: boolean
         default: false
+      free_disk_space_docker_images:
+        description: 'Free disk space for Docker images'
+        required: false
+        type: boolean
+        default: false
+      free_disk_space_tool_cache_storage:
+        description: 'Free disk space for tool cache storage'
+        required: false
+        type: boolean
+        default: false
+      free_disk_space_large_packages:
+        description: 'Free disk space for large packages'
+        required: false
+        type: boolean
+        default: false
     secrets:
       artifactory_username:
         description: 'Username for JFrog Artifactory'
@@ -79,12 +94,12 @@ jobs:
         if: ${{ inputs.free_disk_space }}
         uses: jlumbroso/free-disk-space@main
         with:
-          tool-cache: false
           android: true
           dotnet: true
           haskell: true
-          large-packages: false
-          docker-images: false
+          large-packages: ${{ inputs.free_disk_space_large_packages }}
+          docker-images: ${{ inputs.free_disk_space_docker_images }}
+          tool-cache: ${{ inputs.free_disk_space_tool_cache_storage }}e
           swap-storage: false
 
       - name: Checkout code
