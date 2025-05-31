@@ -106,6 +106,6 @@ jobs:
 
       - name: Mirror image with SOCI index
         run: |
-          sudo nerdctl pull --platform "linux/amd64" "${{ inputs.source_registry }}/${{ inputs.source_image }}"
+          sudo nerdctl pull --quiet --platform "linux/amd64" "${{ inputs.source_registry }}/${{ inputs.source_image }}"
           sudo nerdctl image tag "${{ inputs.source_registry }}/${{ inputs.source_image }}" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
           sudo nerdctl push --platform "linux/amd64" --snapshotter soci "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
