@@ -40,6 +40,21 @@ on:
         required: false
         type: boolean
         default: false
+      enable_ecr:
+        description: 'Enable push to ECR'
+        required: false
+        type: boolean
+        default: false
+      enable_jfrog:
+        description: 'Enable push to JFROG'
+        required: false
+        type: boolean
+        default: true
+      aws_ecr_region:
+        description: 'AWS Public ECR region'
+        required: false
+        type: boolean
+        default: us-east-1
       image_scan_severity_cutoff:
         description: 'Severity cutoff for image scanning'
         required: false
@@ -113,10 +128,18 @@ jobs:
 
       - name: Log in to JFrog Artifactory
         uses: docker/login-action@v3
+        if: ${{ inputs.enable_jfrog }}
         with:
           username: ${{ secrets.artifactory_username }}
           password: ${{ secrets.artifactory_password }}
           registry: ${{ inputs.artifactory_registry_url }}
+
+      - name: configure aws credentials
+        if: ${{ inputs.enable_ecr }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.S3_IAM_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_ecr_region }}
 
       - name: Build image
         uses: docker/build-push-action@v6

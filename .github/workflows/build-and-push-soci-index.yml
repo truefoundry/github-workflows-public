@@ -15,6 +15,16 @@ on:
         description: 'Name of the image artifact, usually the repository name e.g mlfoundry-server'
         required: true
         type: string
+      enable_ecr:
+        description: 'Enable push to ECR'
+        required: false
+        type: boolean
+        default: false
+      aws_ecr_region:
+        description: 'AWS Public ECR region'
+        required: false
+        type: boolean
+        default: us-east-1
       image_tag:
         description: 'Image tag for the image to be pushed'
         required: true
@@ -93,11 +103,20 @@ jobs:
           sudo cp /tmp/nerdctl/* /usr/local/bin/
 
       - name: Login to artifactory_repository_url as current user and root
+        if: !${{ inputs.enable_ecr }}
         run: |
           # needed for pushing images / SOCI indexes which run as the current user
           echo ${{ secrets.artifactory_password }} | nerdctl login -u ${{ secrets.artifactory_username }} --password-stdin ${{ inputs.artifactory_repository_url }}
           # needed the SOCI snapshotter which runs as root
           echo ${{ secrets.artifactory_password }} | sudo nerdctl login -u ${{ secrets.artifactory_username }} --password-stdin ${{ inputs.artifactory_repository_url }}
+      
+      - name: Login to artifactory_repository_url as current user and root
+        if: ${{ inputs.enable_ecr }}
+        run: |
+          # needed for pushing images / SOCI indexes which run as the current user
+          aws ecr get-login-password --region ${{ inputs.aws_ecr_region }}  | nerdctl login -u AWS --password-stdin ${{ inputs.artifactory_repository_url }}
+          # needed the SOCI snapshotter which runs as root
+          aws ecr get-login-password --region ${{ inputs.aws_ecr_region }}  | sudo nerdctl login -u AWS --password-stdin ${{ inputs.artifactory_repository_url }}
 
       - name: Download soci-snapshotter
         run: |
