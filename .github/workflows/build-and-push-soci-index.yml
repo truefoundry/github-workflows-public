@@ -24,7 +24,7 @@ on:
         description: 'AWS Public ECR region'
         required: false
         type: string
-        default: 'us-east-1'
+        default: 'eu-west-1'
       image_tag:
         description: 'Image tag for the image to be pushed'
         required: true
@@ -61,6 +61,9 @@ on:
       artifactory_password:
         description: 'Artifactory password'
         required: true
+
+env:
+  S3_IAM_ROLE_ARN: ${{ secrets.S3_IAM_ROLE_ARN }}
 
 jobs:
   build:
@@ -113,7 +116,7 @@ jobs:
         if: ${{ inputs.enable_ecr }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: "arn:aws:iam::526077812922:role/github-actions-oidc-access-to-public-ecr-role"
+          role-to-assume: ${{ env.S3_IAM_ROLE_ARN }}
           aws-region: ${{ inputs.aws_ecr_region }}
 
       - name: Login to AWS Public ECR as current user and root
@@ -125,6 +128,7 @@ jobs:
       - name: Download soci-snapshotter
         run: |
           cd /tmp
+          
           mkdir -p /tmp/soci-snapshotter
           curl -L -o soci-snapshotter.tar.gz https://github.com/awslabs/soci-snapshotter/releases/download/v0.9.0/soci-snapshotter-0.9.0-linux-amd64-static.tar.gz
           tar -C /tmp/soci-snapshotter -xzf soci-snapshotter.tar.gz

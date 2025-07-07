@@ -54,7 +54,7 @@ on:
         description: 'AWS Public ECR region'
         required: false
         type: string
-        default: 'us-east-1'
+        default: 'eu-west-1'
       image_scan_severity_cutoff:
         description: 'Severity cutoff for image scanning'
         required: false
@@ -91,16 +91,19 @@ on:
         default: false
     secrets:
       artifactory_username:
-        description: 'Username for JFrog Artifactory'
-        required: true
+        description: 'Username for JFrog Artifactory. Required if enable_jfrog is true'
+        required: false
       artifactory_password:
-        description: 'Password for JFrog Artifactory'
-        required: true
+        description: 'Password for JFrog Artifactory. Required if enable_jfrog is true'
+        required: false
+
+env:
+  S3_IAM_ROLE_ARN: ${{ secrets.S3_IAM_ROLE_ARN }}
 
 # Jobs
 jobs:
   build:
-    name: Build and Push Image to JFrog Artifactory
+    name: Build and Push Image to Repository
     runs-on: ubuntu-latest
     env:
       IMAGE_ARTIFACT_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
@@ -138,14 +141,13 @@ jobs:
         if: ${{ inputs.enable_ecr }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: "arn:aws:iam::526077812922:role/github-actions-oidc-access-to-public-ecr-role"
+          role-to-assume: ${{ env.S3_IAM_ROLE_ARN }}
           aws-region: ${{ inputs.aws_ecr_region }}
 
       - name: Login to AWS Public ECR
         if: ${{ inputs.enable_ecr }}
         run: |
-          aws ecr-public get-login-password --region us-east-1 \
-            | docker login --username AWS --password-stdin public.ecr.aws
+          aws ecr-public get-login-password --region ${{ inputs.aws_ecr_region }} docker login --username AWS --password-stdin public.ecr.aws
 
       - name: Build image
         uses: docker/build-push-action@v6
