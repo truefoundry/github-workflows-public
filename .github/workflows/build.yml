@@ -141,6 +141,11 @@ jobs:
           role-to-assume: "arn:aws:iam::526077812922:role/github-actions-oidc-access-to-public-ecr-role"
           aws-region: ${{ inputs.aws_ecr_region }}
 
+      - name: Login to AWS Public ECR
+        run: |
+          aws ecr-public get-login-password --region us-east-1 \
+            | docker login --username AWS --password-stdin public.ecr.aws
+
       - name: Build image
         uses: docker/build-push-action@v6
         if: ${{ inputs.enable_scan }}
