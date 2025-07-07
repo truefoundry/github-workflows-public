@@ -142,6 +142,7 @@ jobs:
           aws-region: ${{ inputs.aws_ecr_region }}
 
       - name: Login to AWS Public ECR
+        if: ${{ inputs.enable_ecr }}
         run: |
           aws ecr-public get-login-password --region us-east-1 \
             | docker login --username AWS --password-stdin public.ecr.aws

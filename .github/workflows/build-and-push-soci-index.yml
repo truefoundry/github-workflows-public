@@ -121,9 +121,9 @@ jobs:
         if: ${{ inputs.enable_ecr }}
         run: |
           # needed for pushing images / SOCI indexes which run as the current user
-          aws ecr get-login-password --region ${{ inputs.aws_ecr_region }}  | nerdctl login -u AWS --password-stdin ${{ inputs.artifactory_repository_url }}
+          aws ecr get-login-password --region ${{ inputs.aws_ecr_region }}  | nerdctl login ---username AWS --password-stdin ${{ inputs.artifactory_registry_url }}
           # needed the SOCI snapshotter which runs as root
-          aws ecr get-login-password --region ${{ inputs.aws_ecr_region }}  | sudo nerdctl login -u AWS --password-stdin ${{ inputs.artifactory_repository_url }}
+          aws ecr get-login-password --region ${{ inputs.aws_ecr_region }}  | sudo nerdctl login ---username AWS --password-stdin ${{ inputs.artifactory_registry_url }}
 
       - name: Download soci-snapshotter
         run: |
