@@ -138,7 +138,7 @@ jobs:
         if: ${{ inputs.enable_ecr }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.S3_IAM_ROLE_ARN }}
+          role-to-assume: "arn:aws:iam::526077812922:role/github-actions-oidc-access-to-public-ecr-role"
           aws-region: ${{ inputs.aws_ecr_region }}
 
       - name: Build image

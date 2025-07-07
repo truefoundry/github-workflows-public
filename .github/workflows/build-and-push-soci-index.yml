@@ -110,7 +110,14 @@ jobs:
           # needed the SOCI snapshotter which runs as root
           echo ${{ secrets.artifactory_password }} | sudo nerdctl login -u ${{ secrets.artifactory_username }} --password-stdin ${{ inputs.artifactory_repository_url }}
       
-      - name: Login to artifactory_repository_url as current user and root
+      - name: configure aws credentials
+        if: ${{ inputs.enable_ecr }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: "arn:aws:iam::526077812922:role/github-actions-oidc-access-to-public-ecr-role"
+          aws-region: ${{ inputs.aws_ecr_region }}
+      
+      - name: Login to aws artifactory_repository_url as current user and root
         if: ${{ inputs.enable_ecr }}
         run: |
           # needed for pushing images / SOCI indexes which run as the current user
