@@ -54,7 +54,7 @@ on:
         description: 'AWS Public ECR region'
         required: false
         type: boolean
-        default: us-east-1
+        default: 'us-east-1'
       image_scan_severity_cutoff:
         description: 'Severity cutoff for image scanning'
         required: false

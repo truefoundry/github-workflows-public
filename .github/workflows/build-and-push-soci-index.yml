@@ -24,7 +24,7 @@ on:
         description: 'AWS Public ECR region'
         required: false
         type: string
-        default: us-east-1
+        default: 'us-east-1'
       image_tag:
         description: 'Image tag for the image to be pushed'
         required: true
