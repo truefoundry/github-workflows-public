@@ -15,7 +15,7 @@ on:
         description: 'Name of the image artifact, usually the repository name e.g mlfoundry-server'
         required: true
         type: string
-      enable_ecr:
+      enable_public_ecr:
         description: 'Enable push to ECR'
         required: false
         type: boolean
