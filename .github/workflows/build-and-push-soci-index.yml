@@ -105,7 +105,7 @@ jobs:
           sudo cp /tmp/nerdctl/* /usr/local/bin/
 
       - name: Login to Artifactory as current user and root
-        if: ${{ inputs.enable_ecr != true }}
+        if: ${{ inputs.enable_public_ecr != true }}
         run: |
           # needed for pushing images / SOCI indexes which run as the current user
           echo ${{ secrets.artifactory_password }} | nerdctl login -u ${{ secrets.artifactory_username }} --password-stdin ${{ inputs.artifactory_repository_url }}
@@ -113,14 +113,14 @@ jobs:
           echo ${{ secrets.artifactory_password }} | sudo nerdctl login -u ${{ secrets.artifactory_username }} --password-stdin ${{ inputs.artifactory_repository_url }}
 
       - name: Configure AWS credentials
-        if: ${{ inputs.enable_ecr }}
+        if: ${{ inputs.enable_public_ecr }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.S3_IAM_ROLE_ARN }}
           aws-region: ${{ inputs.aws_ecr_region }}
 
       - name: Login to AWS Public ECR as current user and root
-        if: ${{ inputs.enable_ecr }}
+        if: ${{ inputs.enable_public_ecr }}
         run: |
           aws ecr-public get-login-password --region ${{ inputs.aws_ecr_region }} | nerdctl login --username AWS --password-stdin public.ecr.aws
           aws ecr-public get-login-password --region ${{ inputs.aws_ecr_region }} | sudo nerdctl login --username AWS --password-stdin public.ecr.aws
