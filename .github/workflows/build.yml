@@ -54,7 +54,7 @@ on:
         description: 'AWS Public ECR region'
         required: false
         type: string
-        default: 'eu-west-1'
+        default: 'us-east-1'
       image_scan_severity_cutoff:
         description: 'Severity cutoff for image scanning'
         required: false
@@ -98,7 +98,7 @@ on:
         required: false
 
 env:
-  S3_IAM_ROLE_ARN: ${{ secrets.S3_IAM_ROLE_ARN }}
+  ECR_IAM_ROLE_ARN: ${{ secrets.ECR_IAM_ROLE_ARN }}
 
 # Jobs
 jobs:
@@ -141,7 +141,7 @@ jobs:
         if: ${{ inputs.enable_public_ecr }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.S3_IAM_ROLE_ARN }}
+          role-to-assume: ${{ env.ECR_IAM_ROLE_ARN }}
           aws-region: ${{ inputs.aws_ecr_region }}
 
       - name: Login to AWS Public ECR
