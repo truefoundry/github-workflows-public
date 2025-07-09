@@ -57,10 +57,10 @@ on:
     secrets:
       artifactory_username:
         description: 'Artifactory username'
-        required: true
+        required: false
       artifactory_password:
         description: 'Artifactory password'
-        required: true
+        required: false
 
 env:
   ECR_IAM_ROLE_ARN: ${{ secrets.ECR_IAM_ROLE_ARN }}
