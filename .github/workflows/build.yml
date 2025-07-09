@@ -96,9 +96,9 @@ on:
       artifactory_password:
         description: 'Password for JFrog Artifactory. Required if enable_jfrog is true'
         required: false
-
-env:
-  ECR_IAM_ROLE_ARN: ${{ secrets.ECR_IAM_ROLE_ARN }}
+      ecr_role_arn:
+        description: 'Role ARN required to pull and push images to public ecr. Required if enable_public_ecr is true'
+        required: false
 
 # Jobs
 jobs:
@@ -141,13 +141,13 @@ jobs:
         if: ${{ inputs.enable_public_ecr }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.ECR_IAM_ROLE_ARN }}
+          role-to-assume: ${{ secrets.ecr_role_arn }}
           aws-region: ${{ inputs.aws_ecr_region }}
 
       - name: Login to AWS Public ECR
         if: ${{ inputs.enable_public_ecr }}
         run: |
-          aws ecr-public get-login-password --region ${{ inputs.aws_ecr_region }} docker login --username AWS --password-stdin public.ecr.aws
+          aws ecr-public get-login-password --region ${{ inputs.aws_ecr_region }} | docker login --username AWS --password-stdin public.ecr.aws
 
       - name: Build image
         uses: docker/build-push-action@v6
