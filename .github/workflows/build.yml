@@ -100,9 +100,6 @@ on:
         description: 'Role ARN required to pull and push images to public ecr. Required if enable_public_ecr is true'
         required: false
 
-env:
-  ECR_IAM_ROLE_ARN: ${{ secrets.ECR_IAM_ROLE_ARN }}
-
 # Jobs
 jobs:
   build:
