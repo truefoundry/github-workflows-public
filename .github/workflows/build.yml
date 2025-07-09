@@ -147,7 +147,7 @@ jobs:
       - name: Login to AWS Public ECR
         if: ${{ inputs.enable_public_ecr }}
         run: |
-          aws ecr-public get-login-password --region ${{ inputs.aws_ecr_region }} docker login --username AWS --password-stdin public.ecr.aws
+          aws ecr-public get-login-password --region ${{ inputs.aws_ecr_region }} | docker login --username AWS --password-stdin public.ecr.aws
 
       - name: Build image
         uses: docker/build-push-action@v6
