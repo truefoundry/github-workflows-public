@@ -111,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       JFROG_IMAGE_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
-      ECR_IMAGE_URL: ${{ inputs.ecr_repository_url }}
+      ECR_IMAGE_URL: ${{ inputs.ecr_repository_url }}/${{ inputs.image_artifact_name }}
     steps:
       - name: Free Disk Space (Ubuntu)
         if: ${{ inputs.free_disk_space }}
