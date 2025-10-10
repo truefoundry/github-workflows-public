@@ -45,6 +45,10 @@ on:
         required: false
         type: boolean
         default: false
+      ecr_repository_url:
+        description: 'Repository URL for AWS Public ECR e.g public.ecr.aws/your-alias/your-repo'
+        required: false
+        type: string
       enable_jfrog:
         description: 'Enable push to JFROG'
         required: false
@@ -106,7 +110,8 @@ jobs:
     name: Build and Push Image to Repository
     runs-on: ubuntu-latest
     env:
-      IMAGE_ARTIFACT_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
+      JFROG_IMAGE_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
+      ECR_IMAGE_URL: ${{ inputs.ecr_repository_url }}
     steps:
       - name: Free Disk Space (Ubuntu)
         if: ${{ inputs.free_disk_space }}
@@ -117,7 +122,7 @@ jobs:
           haskell: true
           large-packages: ${{ inputs.free_disk_space_large_packages }}
           docker-images: ${{ inputs.free_disk_space_docker_images }}
-          tool-cache: ${{ inputs.free_disk_space_tool_cache_storage }}e
+          tool-cache: ${{ inputs.free_disk_space_tool_cache_storage }}
           swap-storage: false
 
       - name: Checkout code
@@ -159,48 +164,69 @@ jobs:
           context: ${{ inputs.image_context }}
           platforms: linux/amd64 # arm intentionally excluded since we can do with just amd for scan image action
           tags: |
-            ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
-          cache-from: type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
-          cache-to: mode=max,image-manifest=true,type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
+            ${{ env.JFROG_IMAGE_URL }}:${{ inputs.image_tag }}
+          cache-from: type=registry,ref=${{ env.JFROG_IMAGE_URL }}:${{ inputs.image_artifact_name }}-buildcache
+          cache-to: mode=max,image-manifest=true,type=registry,ref=${{ env.JFROG_IMAGE_URL }}:${{ inputs.image_artifact_name }}-buildcache
           build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
 
       - name: Scan image
         uses: anchore/scan-action@v6
         if: ${{ inputs.enable_scan }}
         with:
-          image: ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
+          image: ${{ env.JFROG_IMAGE_URL }}:${{ inputs.image_tag }}
           fail-build: true
           severity-cutoff: ${{ inputs.image_scan_severity_cutoff }}
           output-format: table
 
-      - name: Parse extra image tags input
-        id: parse_tags
+      - name: Prepare image tags
+        id: prepare_tags
         env:
-          IMAGE_ARTIFACT_URL: ${{ env.IMAGE_ARTIFACT_URL }}
+          JFROG_IMAGE_URL: ${{ env.JFROG_IMAGE_URL }}
+          ECR_IMAGE_URL: ${{ env.ECR_IMAGE_URL }}
+          ENABLE_JFROG: ${{ inputs.enable_jfrog }}
+          ENABLE_ECR: ${{ inputs.enable_public_ecr }}
         run: |
-          echo "Extra image tags: ${{ inputs.extra_image_tag }}"
-          if [ -z "${{ inputs.extra_image_tag }}" ]; then
-            echo "No extra image tags provided."
-            echo "extra_tags=" >> $GITHUB_ENV
-          else
-            # Initialize variable
-            EXTRA_TAGS=""
-            # Read the extra_image_tag input line by line
+          ALL_TAGS=""
+
+          # Add primary tags for enabled registries
+          if [ "$ENABLE_JFROG" == "true" ]; then
+            echo "Adding JFrog tag: $JFROG_IMAGE_URL:${{ inputs.image_tag }}"
+            ALL_TAGS="$ALL_TAGS$JFROG_IMAGE_URL:${{ inputs.image_tag }}"$'\n'
+          fi
+
+          if [ "$ENABLE_ECR" == "true" ]; then
+            echo "Adding ECR tag: $ECR_IMAGE_URL:${{ inputs.image_tag }}"
+            ALL_TAGS="$ALL_TAGS$ECR_IMAGE_URL:${{ inputs.image_tag }}"$'\n'
+          fi
+
+          # Process extra tags if provided
+          if [ -n "${{ inputs.extra_image_tag }}" ]; then
+            echo "Processing extra image tags: ${{ inputs.extra_image_tag }}"
             while IFS= read -r line; do
               # Strip any leading/trailing quotes
               line=$(echo "$line" | sed 's/^"//;s/"$//')
               if [ -n "$line" ]; then
-                TAG="$IMAGE_ARTIFACT_URL:$line"
-                EXTRA_TAGS="$EXTRA_TAGS$TAG"$'\n'
+                if [ "$ENABLE_JFROG" == "true" ]; then
+                  TAG="$JFROG_IMAGE_URL:$line"
+                  echo "Adding extra JFrog tag: $TAG"
+                  ALL_TAGS="$ALL_TAGS$TAG"$'\n'
+                fi
+                if [ "$ENABLE_ECR" == "true" ]; then
+                  TAG="$ECR_IMAGE_URL:$line"
+                  echo "Adding extra ECR tag: $TAG"
+                  ALL_TAGS="$ALL_TAGS$TAG"$'\n'
+                fi
               fi
             done <<< "${{ inputs.extra_image_tag }}"
-            echo "Parsed extra tags:"
-            echo "$EXTRA_TAGS"
-            # Use '<<EOF' syntax to handle multiline values
-            echo "extra_tags<<EOF" >> $GITHUB_ENV
-            echo "$EXTRA_TAGS" >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
           fi
+
+          echo "All tags to be pushed:"
+          echo "$ALL_TAGS"
+
+          # Save to GitHub environment
+          echo "all_tags<<EOF" >> $GITHUB_ENV
+          echo "$ALL_TAGS" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -210,8 +236,7 @@ jobs:
           file: ${{ inputs.dockerfile_path }}
           context: ${{ inputs.image_context }}
           platforms: ${{ inputs.platforms }}
-          tags: |
-            ${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}
-            ${{ env.extra_tags }}
-          cache-from: type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
-          cache-to: mode=max,image-manifest=true,type=registry,ref=${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_artifact_name }}-buildcache
+          tags: ${{ env.all_tags }}
+          cache-from: type=registry,ref=${{ env.JFROG_IMAGE_URL }}:${{ inputs.image_artifact_name }}-buildcache
+          cache-to: mode=max,image-manifest=true,type=registry,ref=${{ env.JFROG_IMAGE_URL }}:${{ inputs.image_artifact_name }}-buildcache
+          build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
