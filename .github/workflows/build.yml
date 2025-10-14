@@ -93,6 +93,11 @@ on:
         required: false
         type: boolean
         default: false
+      enable_provenance:
+        description: 'Enable provenance attestation for supply chain security'
+        required: false
+        type: boolean
+        default: false
     secrets:
       artifactory_username:
         description: 'Username for JFrog Artifactory. Required if enable_jfrog is true'
@@ -249,28 +254,31 @@ jobs:
             echo "EOF"
           } >> $GITHUB_ENV
 
-      - name: Build and push image (with JFrog cache)
+      - name: Set cache registry
+        id: cache_registry
+        run: |
+          if [ "${{ inputs.enable_jfrog }}" == "true" ]; then
+            echo "cache_ref=${{ env.JFROG_IMAGE_URL }}:buildcache" >> $GITHUB_OUTPUT
+            echo "Using JFrog for build cache"
+          else
+            echo "cache_ref=${{ env.ECR_IMAGE_URL }}:buildcache" >> $GITHUB_OUTPUT
+            echo "Using ECR for build cache"
+          fi
+
+      - name: Build and push image
+        id: build
         uses: docker/build-push-action@v6
-        if: ${{ inputs.enable_jfrog }}
         with:
           push: true
-          provenance: false
+          provenance: ${{ inputs.enable_provenance }}
           file: ${{ inputs.dockerfile_path }}
           context: ${{ inputs.image_context }}
           platforms: ${{ inputs.platforms }}
           tags: ${{ env.all_tags }}
-          cache-from: type=registry,ref=${{ env.JFROG_IMAGE_URL }}:${{ inputs.image_artifact_name }}-buildcache
-          cache-to: mode=max,image-manifest=true,type=registry,ref=${{ env.JFROG_IMAGE_URL }}:${{ inputs.image_artifact_name }}-buildcache
+          cache-from: type=registry,ref=${{ steps.cache_registry.outputs.cache_ref }}
+          cache-to: mode=max,image-manifest=true,compression=zstd,type=registry,ref=${{ steps.cache_registry.outputs.cache_ref }}
           build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
 
-      - name: Build and push image (ECR only, no cache)
-        uses: docker/build-push-action@v6
-        if: ${{ !inputs.enable_jfrog && inputs.enable_public_ecr }}
-        with:
-          push: true
-          provenance: false
-          file: ${{ inputs.dockerfile_path }}
-          context: ${{ inputs.image_context }}
-          platforms: ${{ inputs.platforms }}
-          tags: ${{ env.all_tags }}
-          build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
+      - name: Output image digest
+        run: |
+          echo "Image digest: ${{ steps.build.outputs.digest }}"
