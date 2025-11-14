@@ -130,7 +130,7 @@ jobs:
           cd /tmp
           
           mkdir -p /tmp/soci-snapshotter
-          curl -L -o soci-snapshotter.tar.gz https://github.com/awslabs/soci-snapshotter/releases/download/v0.9.0/soci-snapshotter-0.9.0-linux-amd64-static.tar.gz
+          curl -L -o soci-snapshotter.tar.gz https://github.com/awslabs/soci-snapshotter/releases/download/v0.11.1/soci-snapshotter-0.11.1-linux-amd64-static.tar.gz
           tar -C /tmp/soci-snapshotter -xzf soci-snapshotter.tar.gz
           chmod +x /tmp/soci-snapshotter/soci
           chmod +x /tmp/soci-snapshotter/soci-snapshotter-grpc
@@ -145,8 +145,8 @@ jobs:
             echo "Pulling image for platform: $platform"
             sudo nerdctl pull --quiet --platform $platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
             echo "Pushing SOCI index for platform: $platform"
-            sudo soci create --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
-            sudo soci push --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+            sudo soci convert --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}" "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+            sudo nerdctl push --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
             echo "Removing image for platform: $platform"
             sudo nerdctl rmi "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
           done
