@@ -150,4 +150,5 @@ jobs:
             echo "Removing image for platform: $platform"
             sudo soci index rm --ref "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
             sudo nerdctl rmi "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+            sudo soci rebuild-db
           done
