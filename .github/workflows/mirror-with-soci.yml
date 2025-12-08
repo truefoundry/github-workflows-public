@@ -108,9 +108,10 @@ jobs:
         run: |
           echo "Pulling image for platform: linux/amd64"
           sudo nerdctl pull --quiet --platform "linux/amd64" "${{ inputs.source_registry }}/${{ inputs.source_image }}"
-          echo "Tagging image for platform: linux/amd64"
-          sudo nerdctl image tag "${{ inputs.source_registry }}/${{ inputs.source_image }}" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
+          echo "Staging image for platform: linux/amd64"
+          sudo nerdctl image tag "${{ inputs.source_registry }}/${{ inputs.source_image }}" "${{ inputs.source_registry }}/${{ inputs.source_image }}-temp"
+          sudo nerdctl rmi "${{ inputs.source_registry }}/${{ inputs.source_image }}"
           echo "Converting image to SOCI index for platform: linux/amd64"
-          sudo soci convert --platform "linux/amd64" "${{ inputs.source_registry }}/${{ inputs.source_image }}" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
+          sudo soci convert --platform "linux/amd64" "${{ inputs.source_registry }}/${{ inputs.source_image }}-temp" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
           echo "Pushing image for platform: linux/amd64"
           sudo nerdctl push --quiet --platform "linux/amd64" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
