@@ -93,13 +93,13 @@ jobs:
         run: |
           cd /tmp
           mkdir -p /tmp/containerd
-          curl -L -o containerd.tar.gz https://github.com/containerd/containerd/releases/download/v2.1.1/containerd-2.1.1-linux-amd64.tar.gz
+          curl -L -o containerd.tar.gz https://github.com/containerd/containerd/releases/download/v2.2.0/containerd-2.2.0-linux-amd64.tar.gz
           tar -C /tmp/containerd -xzf containerd.tar.gz
           chmod +x /tmp/containerd/bin/*
           sudo cp /tmp/containerd/bin/* /usr/local/bin/
 
           mkdir -p /tmp/nerdctl
-          curl -L -o nerdctl.tar.gz https://github.com/containerd/nerdctl/releases/download/v2.1.2/nerdctl-2.1.2-linux-amd64.tar.gz
+          curl -L -o nerdctl.tar.gz https://github.com/containerd/nerdctl/releases/download/v2.2.0/nerdctl-2.2.0-linux-amd64.tar.gz
           tar -C /tmp/nerdctl -xzf nerdctl.tar.gz
           chmod +x /tmp/nerdctl/*
           sudo cp /tmp/nerdctl/* /usr/local/bin/
@@ -130,7 +130,7 @@ jobs:
           cd /tmp
           
           mkdir -p /tmp/soci-snapshotter
-          curl -L -o soci-snapshotter.tar.gz https://github.com/awslabs/soci-snapshotter/releases/download/v0.9.0/soci-snapshotter-0.9.0-linux-amd64-static.tar.gz
+          curl -L -o soci-snapshotter.tar.gz https://github.com/awslabs/soci-snapshotter/releases/download/v0.12.0/soci-snapshotter-0.12.0-linux-amd64-static.tar.gz
           tar -C /tmp/soci-snapshotter -xzf soci-snapshotter.tar.gz
           chmod +x /tmp/soci-snapshotter/soci
           chmod +x /tmp/soci-snapshotter/soci-snapshotter-grpc
@@ -142,11 +142,20 @@ jobs:
         run: |
           IFS=',' read -ra PLATFORMS <<< "${{ inputs.platforms }}"
           for platform in "${PLATFORMS[@]}"; do
-            echo "Pulling image for platform: $platform"
-            sudo nerdctl pull --quiet --platform $platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
-            echo "Pushing SOCI index for platform: $platform"
-            sudo soci create --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
-            sudo soci push --platform=$platform "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
-            echo "Removing image for platform: $platform"
-            sudo nerdctl rmi "${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+            IMAGE="${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+            echo "Pulling image for $IMAGE for platform: $platform"
+            sudo nerdctl pull --quiet --platform $platform "${IMAGE}"
+            echo "Staging $IMAGE for soci conversion for platform: $platform"
+            sudo nerdctl tag "${IMAGE}" "${IMAGE}-temp"
+            sudo nerdctl rmi "${IMAGE}"
+            echo "Creating soci index for $IMAGE for platform: $platform"
+            sudo soci convert --platform $platform "${IMAGE}-temp" "${IMAGE}"
+            echo "Pushing soci index for $IMAGE for platform: $platform"
+            sudo nerdctl push --quiet --platform $platform "${IMAGE}"
+            echo "Removing soci index for $IMAGE"
+            sudo soci index rm --ref "${IMAGE}"
+            echo "Removing image for $IMAGE"
+            sudo nerdctl rmi "${IMAGE}-temp" "${IMAGE}"
+            echo "Rebuilding soci database"
+            sudo soci rebuild-db
           done

@@ -73,13 +73,13 @@ jobs:
           cd /tmp
 
           mkdir -p /tmp/containerd
-          curl -L -o containerd.tar.gz https://github.com/containerd/containerd/releases/download/v2.1.1/containerd-2.1.1-linux-amd64.tar.gz
+          curl -L -o containerd.tar.gz https://github.com/containerd/containerd/releases/download/v2.2.0/containerd-2.2.0-linux-amd64.tar.gz
           tar -C /tmp/containerd -xzf containerd.tar.gz
           chmod +x /tmp/containerd/bin/*
           sudo cp /tmp/containerd/bin/* /usr/local/bin/
 
           mkdir -p /tmp/nerdctl
-          curl -L -o nerdctl.tar.gz https://github.com/containerd/nerdctl/releases/download/v2.1.2/nerdctl-2.1.2-linux-amd64.tar.gz
+          curl -L -o nerdctl.tar.gz https://github.com/containerd/nerdctl/releases/download/v2.2.0/nerdctl-2.2.0-linux-amd64.tar.gz
           tar -C /tmp/nerdctl -xzf nerdctl.tar.gz
           chmod +x /tmp/nerdctl/*
           sudo cp /tmp/nerdctl/* /usr/local/bin/
@@ -96,7 +96,7 @@ jobs:
           cd /tmp
 
           mkdir -p /tmp/soci-snapshotter
-          curl -L -o soci-snapshotter.tar.gz https://github.com/awslabs/soci-snapshotter/releases/download/v0.9.0/soci-snapshotter-0.9.0-linux-amd64-static.tar.gz
+          curl -L -o soci-snapshotter.tar.gz https://github.com/awslabs/soci-snapshotter/releases/download/v0.12.0/soci-snapshotter-0.12.0-linux-amd64-static.tar.gz
           tar -C /tmp/soci-snapshotter -xzf soci-snapshotter.tar.gz
           chmod +x /tmp/soci-snapshotter/soci
           chmod +x /tmp/soci-snapshotter/soci-snapshotter-grpc
@@ -106,6 +106,12 @@ jobs:
 
       - name: Mirror image with SOCI index
         run: |
+          echo "Pulling image for platform: linux/amd64"
           sudo nerdctl pull --quiet --platform "linux/amd64" "${{ inputs.source_registry }}/${{ inputs.source_image }}"
-          sudo nerdctl image tag "${{ inputs.source_registry }}/${{ inputs.source_image }}" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
-          sudo nerdctl push --platform "linux/amd64" --snapshotter soci "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
+          echo "Staging image for platform: linux/amd64"
+          sudo nerdctl image tag "${{ inputs.source_registry }}/${{ inputs.source_image }}" "${{ inputs.source_registry }}/${{ inputs.source_image }}-temp"
+          sudo nerdctl rmi "${{ inputs.source_registry }}/${{ inputs.source_image }}"
+          echo "Converting image to SOCI index for platform: linux/amd64"
+          sudo soci convert --platform "linux/amd64" "${{ inputs.source_registry }}/${{ inputs.source_image }}-temp" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
+          echo "Pushing image for platform: linux/amd64"
+          sudo nerdctl push --quiet --platform "linux/amd64" "${{ inputs.artifactory_repository_url }}/${{ inputs.source_image }}"
