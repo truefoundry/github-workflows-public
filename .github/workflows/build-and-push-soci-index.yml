@@ -140,22 +140,19 @@ jobs:
 
       - name: Build and Push SOCI index
         run: |
-          IFS=',' read -ra PLATFORMS <<< "${{ inputs.platforms }}"
-          for platform in "${PLATFORMS[@]}"; do
-            IMAGE="${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
-            echo "Pulling image for $IMAGE for platform: $platform"
-            sudo nerdctl pull --quiet --platform $platform "${IMAGE}"
-            echo "Staging $IMAGE for soci conversion for platform: $platform"
-            sudo nerdctl tag "${IMAGE}" "${IMAGE}-temp"
-            sudo nerdctl rmi "${IMAGE}"
-            echo "Creating soci index for $IMAGE for platform: $platform"
-            sudo soci convert --platform $platform "${IMAGE}-temp" "${IMAGE}"
-            echo "Pushing soci index for $IMAGE for platform: $platform"
-            sudo nerdctl push --quiet --platform $platform "${IMAGE}"
-            echo "Removing soci index for $IMAGE"
-            sudo soci index rm --ref "${IMAGE}"
-            echo "Removing image for $IMAGE"
-            sudo nerdctl rmi "${IMAGE}-temp" "${IMAGE}"
-            echo "Rebuilding soci database"
-            sudo soci rebuild-db
-          done
+          IMAGE="${{ env.IMAGE_ARTIFACT_URL }}:${{ inputs.image_tag }}"
+          echo "Pulling image for $IMAGE"
+          sudo nerdctl pull --quiet --all-platforms "${IMAGE}"
+          echo "Staging $IMAGE for soci conversion"
+          sudo nerdctl tag "${IMAGE}" "${IMAGE}-temp"
+          sudo nerdctl rmi "${IMAGE}"
+          echo "Creating soci index for $IMAGE"
+          sudo soci convert --all-platforms "${IMAGE}-temp" "${IMAGE}"
+          echo "Pushing soci index for $IMAGE"
+          sudo nerdctl push --quiet --all-platforms "${IMAGE}"
+          echo "Removing soci index for $IMAGE"
+          sudo soci index rm --ref "${IMAGE}"
+          echo "Removing image for $IMAGE"
+          sudo nerdctl rmi "${IMAGE}-temp" "${IMAGE}"
+          echo "Rebuilding soci database"
+          sudo soci rebuild-db
