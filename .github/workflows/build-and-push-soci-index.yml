@@ -150,9 +150,3 @@ jobs:
           sudo soci convert --all-platforms "${IMAGE}-temp" "${IMAGE}"
           echo "Pushing soci index for $IMAGE"
           sudo nerdctl push --quiet --all-platforms "${IMAGE}"
-          echo "Removing soci index for $IMAGE"
-          sudo soci index rm --ref "${IMAGE}"
-          echo "Removing image for $IMAGE"
-          sudo nerdctl rmi "${IMAGE}-temp" "${IMAGE}"
-          echo "Rebuilding soci database"
-          sudo soci rebuild-db
