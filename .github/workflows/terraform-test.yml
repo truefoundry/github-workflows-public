@@ -1,0 +1,35 @@
+name: OpenTofu Test
+
+on:
+  workflow_call:
+    inputs:
+      opentofu_version:
+        description: "Version of OpenTofu binary"
+        type: string
+        default: "1.10.0"
+      working_directory:
+        description: "Directory containing the Terraform/OpenTofu module"
+        type: string
+        default: "."
+      test_directory:
+        description: "Directory containing the .tftest.hcl test files (relative to working_directory)"
+        type: string
+        default: "tests"
+
+jobs:
+  tofu-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ inputs.opentofu_version }}
+          tofu_wrapper: false
+      - name: Init
+        working-directory: ${{ inputs.working_directory }}
+        run: tofu init -backend=false
+      - name: Test
+        working-directory: ${{ inputs.working_directory }}
+        run: tofu test -test-directory=${{ inputs.test_directory }}
