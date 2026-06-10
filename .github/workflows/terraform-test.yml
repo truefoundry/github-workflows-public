@@ -6,7 +6,7 @@ on:
       opentofu_version:
         description: "Version of OpenTofu binary"
         type: string
-        default: "1.9.0"
+        default: "1.10.0"
       working_directory:
         description: "Directory containing the Terraform/OpenTofu module"
         type: string
