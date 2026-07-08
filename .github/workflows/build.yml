@@ -98,6 +98,16 @@ on:
         required: false
         type: boolean
         default: false
+      checkout_submodules:
+        description: 'Whether to checkout git submodules: "true", "recursive", or "false"'
+        required: false
+        type: string
+        default: 'false'
+      checkout_fetch_depth:
+        description: 'Number of commits to fetch. 0 fetches all history'
+        required: false
+        type: number
+        default: 1
     secrets:
       artifactory_username:
         description: 'Username for JFrog Artifactory. Required if enable_jfrog is true'
@@ -107,6 +117,12 @@ on:
         required: false
       ecr_role_arn:
         description: 'Role ARN required to pull and push images to public ecr. Required if enable_public_ecr is true'
+        required: false
+      checkout_token:
+        description: 'Token used for checkout (required for private submodules)'
+        required: false
+      image_build_secrets:
+        description: 'Newline-delimited KEY=VALUE build args that contain secrets. Appended to image_build_args (which cannot carry secrets since the caller with: block has no secrets context).'
         required: false
 
 # Jobs
@@ -132,6 +148,10 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: ${{ inputs.checkout_submodules }}
+          fetch-depth: ${{ inputs.checkout_fetch_depth }}
+          token: ${{ secrets.checkout_token || github.token }}
 
       - name: Validate registry configuration
         run: |
@@ -191,7 +211,9 @@ jobs:
           platforms: linux/amd64 # arm intentionally excluded since we can do with just amd for scan image action
           tags: |
             ${{ inputs.image_artifact_name }}:${{ inputs.image_tag }}-scan
-          build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
+          build-args: |
+            ${{ inputs.image_build_args }}
+            ${{ secrets.image_build_secrets }}
 
       - name: Scan image
         uses: anchore/scan-action@v6
@@ -277,7 +299,9 @@ jobs:
           tags: ${{ env.all_tags }}
           cache-from: type=registry,ref=${{ steps.cache_registry.outputs.cache_ref }}
           cache-to: mode=max,image-manifest=true,compression=zstd,type=registry,ref=${{ steps.cache_registry.outputs.cache_ref }}
-          build-args: ${{ inputs.image_build_args && toJSON(inputs.image_build_args) || '' }}
+          build-args: |
+            ${{ inputs.image_build_args }}
+            ${{ secrets.image_build_secrets }}
 
       - name: Output image digest
         run: |
