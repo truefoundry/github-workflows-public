@@ -118,6 +118,10 @@ on:
         required: false
         type: number
         default: 1
+    outputs:
+      digest:
+        description: 'Digest (sha256:…) of the pushed image manifest'
+        value: ${{ jobs.build.outputs.digest }}
     secrets:
       artifactory_username:
         description: 'Username for JFrog Artifactory. Required if enable_jfrog is true'
