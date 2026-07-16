@@ -328,6 +328,7 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Install Syft
+        id: syft
         if: ${{ inputs.enable_sbom }}
         uses: anchore/sbom-action/download-syft@v0
 
@@ -360,16 +361,21 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
           ENABLE_JFROG: ${{ inputs.enable_jfrog }}
           ENABLE_ECR: ${{ inputs.enable_public_ecr }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
         run: |
           set -euo pipefail
           if [ -z "$DIGEST" ]; then
             echo "Error: image digest is empty, cannot generate SBOM" >&2
             exit 1
           fi
+          if [ -z "$SYFT" ]; then
+            echo "Error: Syft command path is empty, cannot generate SBOM" >&2
+            exit 1
+          fi
           attest_sbom() {
             ref="$1"
             echo "Generating SBOM for ${ref}"
-            syft scan "registry:${ref}" -o spdx-json=sbom.spdx.json
+            "$SYFT" scan "registry:${ref}" -o spdx-json=sbom.spdx.json
             echo "Attesting SBOM for ${ref}"
             cosign attest --predicate sbom.spdx.json --type spdxjson "${ref}"
           }
