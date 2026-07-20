@@ -98,16 +98,16 @@ on:
         required: false
         type: boolean
         default: false
-      enable_sign:
-        description: 'Sign the pushed image(s) by digest with cosign (keyless/Sigstore). Requires the calling job to grant id-token: write.'
-        required: false
-        type: boolean
-        default: false
       enable_sbom:
-        description: 'Generate an SPDX SBOM for the pushed image(s) and attach it as a cosign attestation. Requires the calling job to grant id-token: write.'
+        description: 'Generate an SPDX SBOM for the pushed image and upload it as a workflow artifact (e.g. to attach to a release for OpenSSF compliance)'
         required: false
         type: boolean
         default: false
+      sbom_artifact_name:
+        description: 'Name of the uploaded workflow artifact that contains the SBOM'
+        required: false
+        type: string
+        default: 'sbom'
       checkout_submodules:
         description: 'Whether to checkout git submodules: "true", "recursive", or "false"'
         required: false
@@ -119,9 +119,12 @@ on:
         type: number
         default: 1
     outputs:
-      digest:
-        description: 'Digest (sha256:…) of the pushed image manifest'
-        value: ${{ jobs.build.outputs.digest }}
+      sbom_artifact_name:
+        description: 'Name of the uploaded workflow artifact containing the SPDX SBOM (download with actions/download-artifact to attach it to a release). Empty when enable_sbom is false.'
+        value: ${{ jobs.build.outputs.sbom_artifact_name }}
+      sbom_file_name:
+        description: 'File name of the SPDX SBOM inside the uploaded artifact. Empty when enable_sbom is false.'
+        value: ${{ jobs.build.outputs.sbom_file_name }}
     secrets:
       artifactory_username:
         description: 'Username for JFrog Artifactory. Required if enable_jfrog is true'
@@ -145,7 +148,8 @@ jobs:
     name: Build and Push Image to Repository
     runs-on: ubuntu-latest
     outputs:
-      digest: ${{ steps.build.outputs.digest }}
+      sbom_artifact_name: ${{ steps.sbom.outputs.artifact_name }}
+      sbom_file_name: ${{ steps.sbom.outputs.file }}
     env:
       JFROG_IMAGE_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
       ECR_IMAGE_URL: ${{ inputs.ecr_repository_url }}/${{ inputs.image_artifact_name }}
@@ -323,45 +327,19 @@ jobs:
         run: |
           echo "Image digest: ${{ steps.build.outputs.digest }}"
 
-      - name: Install cosign
-        if: ${{ inputs.enable_sign || inputs.enable_sbom }}
-        uses: sigstore/cosign-installer@v3
-
       - name: Install Syft
         id: syft
         if: ${{ inputs.enable_sbom }}
         uses: anchore/sbom-action/download-syft@v0
 
-      - name: Sign image(s) with cosign (keyless)
-        if: ${{ inputs.enable_sign }}
-        env:
-          COSIGN_YES: 'true'
-          DIGEST: ${{ steps.build.outputs.digest }}
-          ENABLE_JFROG: ${{ inputs.enable_jfrog }}
-          ENABLE_ECR: ${{ inputs.enable_public_ecr }}
-        run: |
-          set -euo pipefail
-          if [ -z "$DIGEST" ]; then
-            echo "Error: image digest is empty, cannot sign" >&2
-            exit 1
-          fi
-          if [ "$ENABLE_JFROG" == "true" ]; then
-            echo "Signing ${JFROG_IMAGE_URL}@${DIGEST}"
-            cosign sign "${JFROG_IMAGE_URL}@${DIGEST}"
-          fi
-          if [ "$ENABLE_ECR" == "true" ]; then
-            echo "Signing ${ECR_IMAGE_URL}@${DIGEST}"
-            cosign sign "${ECR_IMAGE_URL}@${DIGEST}"
-          fi
-
-      - name: Generate and attest SBOM (keyless)
+      - name: Generate SBOM
+        id: sbom
         if: ${{ inputs.enable_sbom }}
         env:
-          COSIGN_YES: 'true'
           DIGEST: ${{ steps.build.outputs.digest }}
           ENABLE_JFROG: ${{ inputs.enable_jfrog }}
-          ENABLE_ECR: ${{ inputs.enable_public_ecr }}
           SYFT: ${{ steps.syft.outputs.cmd }}
+          SBOM_ARTIFACT_NAME: ${{ inputs.sbom_artifact_name }}
         run: |
           set -euo pipefail
           if [ -z "$DIGEST" ]; then
@@ -372,16 +350,29 @@ jobs:
             echo "Error: Syft command path is empty, cannot generate SBOM" >&2
             exit 1
           fi
-          attest_sbom() {
-            ref="$1"
-            echo "Generating SBOM for ${ref}"
-            "$SYFT" scan "registry:${ref}" -o spdx-json=sbom.spdx.json
-            echo "Attesting SBOM for ${ref}"
-            cosign attest --predicate sbom.spdx.json --type spdxjson "${ref}"
-          }
+
+          # The image content is identical across registries (same digest), so a
+          # single SBOM is generated from whichever registry is enabled.
           if [ "$ENABLE_JFROG" == "true" ]; then
-            attest_sbom "${JFROG_IMAGE_URL}@${DIGEST}"
+            REF="${JFROG_IMAGE_URL}@${DIGEST}"
+          else
+            REF="${ECR_IMAGE_URL}@${DIGEST}"
           fi
-          if [ "$ENABLE_ECR" == "true" ]; then
-            attest_sbom "${ECR_IMAGE_URL}@${DIGEST}"
-          fi
+
+          # Build a filesystem-safe SBOM file name from the artifact name and tag.
+          SBOM_FILE="${{ inputs.image_artifact_name }}-${{ inputs.image_tag }}.spdx.json"
+          SBOM_FILE="${SBOM_FILE//\//-}"
+
+          echo "Generating SPDX SBOM for ${REF} -> ${SBOM_FILE}"
+          "$SYFT" scan "registry:${REF}" -o spdx-json="${SBOM_FILE}"
+
+          echo "file=${SBOM_FILE}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=${SBOM_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SBOM artifact
+        if: ${{ inputs.enable_sbom }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.sbom.outputs.artifact_name }}
+          path: ${{ steps.sbom.outputs.file }}
+          if-no-files-found: error
