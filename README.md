@@ -40,8 +40,10 @@ jobs:
 Builds a multi-platform Docker image and pushes it to JFrog Artifactory, AWS Public
 ECR and/or GitHub Container Registry (GHCR). Optionally frees runner disk space, scans the `amd64` image with Anchore Grype before
 pushing, applies extra tags, and emits provenance attestation. Can also generate an SPDX
-SBOM for the pushed image (using [Syft](https://github.com/anchore/syft)) and upload it as a
-workflow artifact so callers can attach it to a release. Uses a registry-based build cache.
+SBOM for the pushed image (using [Syft](https://github.com/anchore/syft)) and keyless-sign the
+image and SBOM with [cosign](https://github.com/sigstore/cosign), uploading everything as a single
+workflow artifact so callers can attach it to a release (e.g. for the OpenSSF Signed-Releases
+check). Uses a registry-based build cache.
 
 **Usage**
 
@@ -88,7 +90,8 @@ jobs:
 | `free_disk_space_large_packages`     | Free disk space used by large packages                                | boolean | false    | `false`                  |
 | `enable_provenance`                  | Enable provenance attestation for supply-chain security               | boolean | false    | `false`                  |
 | `enable_sbom`                        | Generate an SPDX SBOM for the pushed image (Syft) and upload it as a workflow artifact | boolean | false | `false`         |
-| `sbom_artifact_name`                 | Name of the uploaded workflow artifact containing the SBOM            | string  | false    | `sbom`                   |
+| `sbom_artifact_name`                 | Name of the uploaded workflow artifact containing the SBOM and signatures | string  | false    | `sbom`                   |
+| `enable_sign`                        | Keyless (Sigstore) sign the image and SBOM with cosign; uploads `.sig`/`.pem`/`.payload`/`.sigstore.json` in the SBOM artifact. Requires the calling job to grant `id-token: write`; SBOM signing needs `enable_sbom: true` | boolean | false | `false` |
 
 **Secrets**
 
@@ -103,26 +106,53 @@ jobs:
 
 | Name                 | Description                                                                                     |
 | -------------------- | ----------------------------------------------------------------------------------------------- |
-| `sbom_artifact_name` | Name of the uploaded workflow artifact containing the SPDX SBOM (empty when `enable_sbom` is false) |
-| `sbom_file_name`     | File name of the SPDX SBOM inside the uploaded artifact (empty when `enable_sbom` is false)      |
+| `sbom_artifact_name`          | Name of the uploaded workflow artifact containing the SBOM and any signatures (empty unless `enable_sbom` or `enable_sign`) |
+| `sbom_file_name`              | File name of the SPDX SBOM inside the uploaded artifact (empty when `enable_sbom` is false)      |
+| `sbom_signature_file_name`    | File name of the SBOM's Sigstore bundle `*.sigstore.json` (empty unless `enable_sign` and `enable_sbom`) |
+| `image_signature_file_name`   | File name of the raw cosign image signature `*.sig` (empty when `enable_sign` is false)          |
+| `image_certificate_file_name` | File name of the Fulcio signing certificate `*.pem` for the image signature (empty when `enable_sign` is false) |
 
 **SBOM (Syft)**
 
 When `enable_sbom` is `true`, an SPDX-JSON SBOM is generated for the pushed image (scanned by
 digest with [Syft](https://github.com/anchore/syft)) and uploaded as a workflow artifact. The
-caller can download that artifact with `actions/download-artifact` and attach it to a release —
-for example to satisfy OpenSSF compliance requirements.
+caller can download that artifact with `actions/download-artifact` and attach it to a release.
+
+**Signing (keyless / Sigstore)**
+
+When `enable_sign` is `true`, the workflow uses keyless [cosign](https://github.com/sigstore/cosign)
+(Sigstore) — no long-lived keys, trust is anchored to the workflow's GitHub OIDC identity via
+Fulcio and the Rekor transparency log. It does two things:
+
+- **Image**: `cosign sign` the pushed image by digest in every enabled registry (verifiable with
+  `cosign verify`), and also emits raw signature files for the release: `<base>.sig`,
+  `<base>.pem` (the Fulcio certificate) and `<base>.payload` (the signed payload, so the `.sig` is
+  offline-verifiable).
+- **SBOM** (requires `enable_sbom: true`): `cosign sign-blob --bundle` the SBOM, producing a
+  self-contained `<base>.spdx.json.sigstore.json` bundle.
+
+All of these — the SBOM plus every signature file — are uploaded together in the single artifact
+named by `sbom_artifact_name`, so the caller downloads once and attaches them all to the release.
+The `*.sigstore.json` and `*.sig` filenames are what the **OpenSSF Signed-Releases** check looks
+for in release assets (score 8).
+
+> The calling `build` job **must** grant `permissions: id-token: write` for keyless signing to work
+> (plus `packages: write` if `enable_ghcr` is used). `contents: read` is the default.
 
 ```yaml
 jobs:
   build:
     uses: truefoundry/github-workflows-public/.github/workflows/build.yml@main
+    permissions:
+      contents: read
+      id-token: write        # required for keyless cosign signing
     with:
       artifactory_registry_url: tfy.jfrog.io
       artifactory_repository_url: tfy.jfrog.io/tfy-images
       image_artifact_name: mlfoundry-server
       image_tag: ${{ github.ref_name }}
       enable_sbom: true
+      enable_sign: true
     secrets:
       artifactory_username: ${{ secrets.ARTIFACTORY_USERNAME }}
       artifactory_password: ${{ secrets.ARTIFACTORY_PASSWORD }}
@@ -133,16 +163,40 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download SBOM
+      - name: Download SBOM and signatures
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build.outputs.sbom_artifact_name }}
-          path: sbom
+          path: dl
 
-      - name: Attach SBOM to release
+      - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: sbom/${{ needs.build.outputs.sbom_file_name }}
+          files: dl/*      # SBOM + .sigstore.json + .sig + .pem + .payload
+```
+
+**Verifying signatures**
+
+The keyless identity in the certificate is **this reusable workflow's ref**, not the caller repo.
+Verify with (using a regexp so it matches any branch/tag the workflow was pinned to):
+
+```bash
+ID_RE='^https://github.com/truefoundry/github-workflows-public/\.github/workflows/build\.yml@.*'
+ISSUER='https://token.actions.githubusercontent.com'
+
+# Image — pulls the signature from the registry (recommended)
+cosign verify --certificate-oidc-issuer "$ISSUER" --certificate-identity-regexp "$ID_RE" \
+  tfy.jfrog.io/tfy-images/mlfoundry-server@sha256:<digest>
+
+# SBOM bundle — offline, from the release asset
+cosign verify-blob --bundle mlfoundry-server-<tag>.spdx.json.sigstore.json \
+  --certificate-oidc-issuer "$ISSUER" --certificate-identity-regexp "$ID_RE" \
+  mlfoundry-server-<tag>.spdx.json
+
+# Raw image signature — offline, from the release assets
+cosign verify-blob --signature mlfoundry-server-<tag>.sig --certificate mlfoundry-server-<tag>.pem \
+  --certificate-oidc-issuer "$ISSUER" --certificate-identity-regexp "$ID_RE" \
+  mlfoundry-server-<tag>.payload
 ```
 
 **GHCR (GitHub Container Registry)**

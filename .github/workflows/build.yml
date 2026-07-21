@@ -117,6 +117,11 @@ on:
         required: false
         type: string
         default: 'sbom'
+      enable_sign:
+        description: 'Keyless (Sigstore) sign the pushed image by digest with cosign (signature stored in the registry and emitted as .sig/.pem/.payload files) and sign the SPDX SBOM to produce a .sigstore.json bundle. All signature files are uploaded in the SBOM workflow artifact for attaching to a GitHub release (OpenSSF Signed-Releases). Requires the calling job to grant id-token: write. Signing the SBOM requires enable_sbom to be true.'
+        required: false
+        type: boolean
+        default: false
       checkout_submodules:
         description: 'Whether to checkout git submodules: "true", "recursive", or "false"'
         required: false
@@ -134,6 +139,15 @@ on:
       sbom_file_name:
         description: 'File name of the SPDX SBOM inside the uploaded artifact. Empty when enable_sbom is false.'
         value: ${{ jobs.build.outputs.sbom_file_name }}
+      sbom_signature_file_name:
+        description: 'File name of the keyless Sigstore bundle (*.sigstore.json) signing the SBOM, inside the uploaded artifact. Empty unless enable_sign and enable_sbom are both true.'
+        value: ${{ jobs.build.outputs.sbom_signature_file_name }}
+      image_signature_file_name:
+        description: 'File name of the raw cosign image signature (*.sig) inside the uploaded artifact. Empty when enable_sign is false.'
+        value: ${{ jobs.build.outputs.image_signature_file_name }}
+      image_certificate_file_name:
+        description: 'File name of the Fulcio signing certificate (*.pem) for the image signature, inside the uploaded artifact. Empty when enable_sign is false.'
+        value: ${{ jobs.build.outputs.image_certificate_file_name }}
     secrets:
       artifactory_username:
         description: 'Username for JFrog Artifactory. Required if enable_jfrog is true'
@@ -160,8 +174,11 @@ jobs:
     name: Build and Push Image to Repository
     runs-on: ubuntu-latest
     outputs:
-      sbom_artifact_name: ${{ steps.sbom.outputs.artifact_name }}
+      sbom_artifact_name: ${{ (inputs.enable_sbom || inputs.enable_sign) && inputs.sbom_artifact_name || '' }}
       sbom_file_name: ${{ steps.sbom.outputs.file }}
+      sbom_signature_file_name: ${{ steps.sign_sbom.outputs.signature_file }}
+      image_signature_file_name: ${{ steps.sign_image.outputs.signature_file }}
+      image_certificate_file_name: ${{ steps.sign_image.outputs.certificate_file }}
     env:
       JFROG_IMAGE_URL: ${{ inputs.artifactory_repository_url }}/${{ inputs.image_artifact_name }}
       ECR_IMAGE_URL: ${{ inputs.ecr_repository_url }}/${{ inputs.image_artifact_name }}
@@ -376,6 +393,68 @@ jobs:
         run: |
           echo "Image digest: ${{ steps.build.outputs.digest }}"
 
+      - name: Install cosign
+        if: ${{ inputs.enable_sign }}
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image(s) with cosign (keyless)
+        id: sign_image
+        if: ${{ inputs.enable_sign }}
+        env:
+          COSIGN_YES: 'true'
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ENABLE_JFROG: ${{ inputs.enable_jfrog }}
+          ENABLE_ECR: ${{ inputs.enable_public_ecr }}
+          ENABLE_GHCR: ${{ inputs.enable_ghcr }}
+          ENABLE_SBOM: ${{ inputs.enable_sbom }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DIGEST" ]; then
+            echo "Error: image digest is empty, cannot sign" >&2
+            exit 1
+          fi
+
+          if [ "$ENABLE_SBOM" != "true" ]; then
+            echo "::notice::enable_sign is on but enable_sbom is off; no SBOM signature (*.sigstore.json) will be produced. Enable enable_sbom for the strongest OpenSSF Signed-Releases result."
+          fi
+
+          mkdir -p release-artifacts
+
+          # Filesystem-safe base name shared by all release signature files.
+          BASE="${{ inputs.image_artifact_name }}-${{ inputs.image_tag }}"
+          BASE="${BASE//\//-}"
+
+          # Collect every enabled registry ref for the pushed digest. The image
+          # content is identical across registries, so one set of output files
+          # (from the first ref) represents all of them.
+          REFS=()
+          if [ "$ENABLE_JFROG" == "true" ]; then REFS+=("${JFROG_IMAGE_URL}@${DIGEST}"); fi
+          if [ "$ENABLE_ECR" == "true" ]; then REFS+=("${ECR_IMAGE_URL}@${DIGEST}"); fi
+          if [ "$ENABLE_GHCR" == "true" ]; then REFS+=("${GHCR_IMAGE_URL}@${DIGEST}"); fi
+
+          SIG_FILE="${BASE}.sig"
+          CERT_FILE="${BASE}.pem"
+          PAYLOAD_FILE="${BASE}.payload"
+
+          first=1
+          for ref in "${REFS[@]}"; do
+            if [ "$first" == "1" ]; then
+              echo "Signing ${ref} (emitting release files)"
+              cosign sign --yes \
+                --output-signature "release-artifacts/${SIG_FILE}" \
+                --output-certificate "release-artifacts/${CERT_FILE}" \
+                --output-payload "release-artifacts/${PAYLOAD_FILE}" \
+                "${ref}"
+              first=0
+            else
+              echo "Signing ${ref}"
+              cosign sign --yes "${ref}"
+            fi
+          done
+
+          echo "signature_file=${SIG_FILE}" >> "$GITHUB_OUTPUT"
+          echo "certificate_file=${CERT_FILE}" >> "$GITHUB_OUTPUT"
+
       - name: Install Syft
         id: syft
         if: ${{ inputs.enable_sbom }}
@@ -389,7 +468,6 @@ jobs:
           ENABLE_JFROG: ${{ inputs.enable_jfrog }}
           ENABLE_ECR: ${{ inputs.enable_public_ecr }}
           SYFT: ${{ steps.syft.outputs.cmd }}
-          SBOM_ARTIFACT_NAME: ${{ inputs.sbom_artifact_name }}
         run: |
           set -euo pipefail
           if [ -z "$DIGEST" ]; then
@@ -400,6 +478,8 @@ jobs:
             echo "Error: Syft command path is empty, cannot generate SBOM" >&2
             exit 1
           fi
+
+          mkdir -p release-artifacts
 
           # The image content is identical across registries (same digest), so a
           # single SBOM is generated from whichever registry is enabled.
@@ -415,16 +495,39 @@ jobs:
           SBOM_FILE="${{ inputs.image_artifact_name }}-${{ inputs.image_tag }}.spdx.json"
           SBOM_FILE="${SBOM_FILE//\//-}"
 
-          echo "Generating SPDX SBOM for ${REF} -> ${SBOM_FILE}"
-          "$SYFT" scan "registry:${REF}" -o spdx-json="${SBOM_FILE}"
+          echo "Generating SPDX SBOM for ${REF} -> release-artifacts/${SBOM_FILE}"
+          "$SYFT" scan "registry:${REF}" -o spdx-json="release-artifacts/${SBOM_FILE}"
 
           echo "file=${SBOM_FILE}" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=${SBOM_ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload SBOM artifact
-        if: ${{ inputs.enable_sbom }}
+      - name: Sign SBOM with cosign (keyless)
+        id: sign_sbom
+        if: ${{ inputs.enable_sign && inputs.enable_sbom }}
+        env:
+          COSIGN_YES: 'true'
+          SBOM_FILE: ${{ steps.sbom.outputs.file }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SBOM_FILE" ]; then
+            echo "Error: SBOM file name is empty, cannot sign SBOM" >&2
+            exit 1
+          fi
+
+          # cosign sign-blob --bundle emits a self-contained Sigstore bundle
+          # (signature + Fulcio cert + Rekor proof). Named *.sigstore.json so it
+          # is recognised by the OpenSSF Signed-Releases check as a release asset.
+          SIG_FILE="${SBOM_FILE}.sigstore.json"
+          echo "Signing SBOM release-artifacts/${SBOM_FILE} -> release-artifacts/${SIG_FILE}"
+          cosign sign-blob --yes \
+            --bundle "release-artifacts/${SIG_FILE}" \
+            "release-artifacts/${SBOM_FILE}"
+
+          echo "signature_file=${SIG_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SBOM and signature artifact
+        if: ${{ inputs.enable_sbom || inputs.enable_sign }}
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.sbom.outputs.artifact_name }}
-          path: ${{ steps.sbom.outputs.file }}
+          name: ${{ inputs.sbom_artifact_name }}
+          path: release-artifacts
           if-no-files-found: error
