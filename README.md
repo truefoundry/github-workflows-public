@@ -22,7 +22,7 @@ jobs:
 
 | Workflow file                     | Name                                          | Purpose                                                              |
 | --------------------------------- | --------------------------------------------- | ------------------------------------------------------------------- |
-| `build.yml`                       | Build and push container images to Artifactory | Build a multi-platform image and push to JFrog Artifactory and/or AWS Public ECR |
+| `build.yml`                       | Build and push container images to Artifactory | Build a multi-platform image and push to JFrog Artifactory, AWS Public ECR and/or GitHub Container Registry (GHCR) |
 | `build-and-push-soci-index.yml`   | Build and push SOCI index                     | Convert an existing pushed image into a SOCI index for lazy pulls   |
 | `mirror-with-soci.yml`            | Mirror x86 image with SOCI index              | Mirror an `amd64` image from a source registry and push a SOCI index |
 | `update-grype-report.yml`         | Update Grype Ignore File                      | Scan an image with Grype and open a PR updating the ignore list     |
@@ -37,8 +37,8 @@ jobs:
 
 ### `build.yml` — Build and push container images to Artifactory
 
-Builds a multi-platform Docker image and pushes it to JFrog Artifactory and/or AWS Public
-ECR. Optionally frees runner disk space, scans the `amd64` image with Anchore Grype before
+Builds a multi-platform Docker image and pushes it to JFrog Artifactory, AWS Public
+ECR and/or GitHub Container Registry (GHCR). Optionally frees runner disk space, scans the `amd64` image with Anchore Grype before
 pushing, applies extra tags, and emits provenance attestation. Can also generate an SPDX
 SBOM for the pushed image (using [Syft](https://github.com/anchore/syft)) and upload it as a
 workflow artifact so callers can attach it to a release. Uses a registry-based build cache.
@@ -76,6 +76,8 @@ jobs:
 | `enable_public_ecr`                  | Enable push to AWS Public ECR                                         | boolean | false    | `false`                  |
 | `ecr_repository_url`                 | Repository URL for AWS Public ECR (e.g. `public.ecr.aws/alias/repo`)  | string  | false    |                          |
 | `enable_jfrog`                       | Enable push to JFrog Artifactory                                      | boolean | false    | `true`                   |
+| `enable_ghcr`                        | Enable push to GitHub Container Registry (`ghcr.io`)                  | boolean | false    | `false`                  |
+| `ghcr_repository_url`                | GHCR registry + owner (e.g. `ghcr.io/your-org`); lowercased automatically | string  | false    |                          |
 | `aws_ecr_region`                     | AWS Public ECR region                                                 | string  | false    | `us-east-1`              |
 | `image_scan_severity_cutoff`         | Severity cutoff for image scanning                                    | string  | false    | `high`                   |
 | `dockerfile_path`                    | Path to the Dockerfile                                                | string  | false    | `Dockerfile`             |
@@ -95,6 +97,7 @@ jobs:
 | `artifactory_username` | Username for JFrog Artifactory                          | Required if `enable_jfrog`  |
 | `artifactory_password` | Password for JFrog Artifactory                          | Required if `enable_jfrog`  |
 | `ecr_role_arn`         | Role ARN to pull/push images to AWS Public ECR          | Required if `enable_public_ecr` |
+| `ghcr_token`           | Token to push to GHCR. Defaults to the caller's `GITHUB_TOKEN`; provide a PAT only to push to a different owner | Optional (with `enable_ghcr`) |
 
 **Outputs**
 
@@ -141,6 +144,42 @@ jobs:
         with:
           files: sbom/${{ needs.build.outputs.sbom_file_name }}
 ```
+
+**GHCR (GitHub Container Registry)**
+
+Push to `ghcr.io` by setting `enable_ghcr: true` and `ghcr_repository_url` to your registry +
+owner. In the common case (pushing to a package owned by the same org as the calling repo) no
+secret is needed — the workflow uses the caller's `GITHUB_TOKEN`. **The calling job must grant
+`packages: write`**, because a reusable workflow inherits its token permissions from the caller:
+
+```yaml
+jobs:
+  build:
+    permissions:
+      contents: read
+      packages: write        # required for GHCR push via GITHUB_TOKEN
+    uses: truefoundry/github-workflows-public/.github/workflows/build.yml@main
+    with:
+      enable_jfrog: false
+      enable_ghcr: true
+      ghcr_repository_url: ghcr.io/${{ github.repository_owner }}
+      image_artifact_name: mlfoundry-server
+      image_tag: ${{ github.sha }}
+```
+
+Notes:
+
+- GHCR requires the full image reference to be lowercase; `ghcr_repository_url` is lowercased
+  automatically, so `github.repository_owner` values with capitals are fine.
+- To push to a **different** owner than the calling repo, `GITHUB_TOKEN` is not enough — pass a
+  PAT with `write:packages` as the `ghcr_token` secret.
+- GHCR can be enabled alongside JFrog and/or ECR; the image is built once and pushed to all
+  enabled registries.
+- **Newly created GHCR packages are private by default.** To make an image pullable without
+  authentication, change its visibility to public manually after the first push: open the
+  package at `https://github.com/orgs/<owner>/packages` (or the user's Packages tab) →
+  **Package settings** → **Change visibility** → **Public**. This only needs to be done once per
+  package.
 
 ---
 
