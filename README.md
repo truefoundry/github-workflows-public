@@ -77,10 +77,12 @@ jobs:
 | `enable_scan`                        | Enable image scanning (Grype)                                         | boolean | false    | `false`                  |
 | `enable_public_ecr`                  | Enable push to AWS Public ECR                                         | boolean | false    | `false`                  |
 | `ecr_repository_url`                 | Repository URL for AWS Public ECR (e.g. `public.ecr.aws/alias/repo`)  | string  | false    |                          |
+| `enable_private_ecr_pull`            | Authenticate to a private AWS ECR registry before building so the Dockerfile can pull base images from it. Pull only; does not change where the image is pushed. Requires `id-token: write` | boolean | false | `false`          |
+| `private_ecr_pull_registry`          | Private ECR registry host to pull base images from (e.g. `111111111111.dkr.ecr.ap-south-1.amazonaws.com`); account and region are parsed from it. Defaults to the pull role's own account in `aws_ecr_region` | string  | false    |                          |
 | `enable_jfrog`                       | Enable push to JFrog Artifactory                                      | boolean | false    | `true`                   |
 | `enable_ghcr`                        | Enable push to GitHub Container Registry (`ghcr.io`)                  | boolean | false    | `false`                  |
 | `ghcr_repository_url`                | GHCR registry + owner (e.g. `ghcr.io/your-org`); lowercased automatically | string  | false    |                          |
-| `aws_ecr_region`                     | AWS Public ECR region                                                 | string  | false    | `us-east-1`              |
+| `aws_ecr_region`                     | AWS region used for ECR (public ECR push and private ECR base-image pull) | string  | false    | `us-east-1`              |
 | `image_scan_severity_cutoff`         | Severity cutoff for image scanning                                    | string  | false    | `high`                   |
 | `dockerfile_path`                    | Path to the Dockerfile                                                | string  | false    | `Dockerfile`             |
 | `image_build_args`                   | Build-time arguments for Docker                                       | string  | false    |                          |
@@ -99,7 +101,8 @@ jobs:
 | ---------------------- | ------------------------------------------------------- | --------------------------- |
 | `artifactory_username` | Username for JFrog Artifactory                          | Required if `enable_jfrog`  |
 | `artifactory_password` | Password for JFrog Artifactory                          | Required if `enable_jfrog`  |
-| `ecr_role_arn`         | Role ARN to pull/push images to AWS Public ECR          | Required if `enable_public_ecr` |
+| `ecr_role_arn`         | Role ARN to pull/push images to AWS Public ECR; also the fallback for `private_ecr_pull_role_arn` | Required if `enable_public_ecr` |
+| `private_ecr_pull_role_arn` | Role ARN assumed to pull base images from private ECR | Required if `enable_private_ecr_pull` (unless `ecr_role_arn` is set) |
 | `ghcr_token`           | Token to push to GHCR. Defaults to the caller's `GITHUB_TOKEN`; provide a PAT only to push to a different owner | Optional (with `enable_ghcr`) |
 
 **Outputs**
@@ -111,6 +114,48 @@ jobs:
 | `sbom_signature_file_name`    | File name of the SBOM's Sigstore bundle `*.sigstore.json` (empty unless `enable_sign` and `enable_sbom`) |
 | `image_signature_file_name`   | File name of the raw cosign image signature `*.sig` (empty when `enable_sign` is false)          |
 | `image_certificate_file_name` | File name of the Fulcio signing certificate `*.pem` for the image signature (empty when `enable_sign` is false) |
+
+**Pulling base images from a private ECR account**
+
+The ECR pull credential is resolved on its own and does not affect where the built
+image goes, so a base image can come from a private ECR registry in one AWS account
+while the image is pushed to Artifactory (or GHCR, or public ECR) as usual. The account
+ID and region are parsed from `private_ecr_pull_registry`, so the base image may live in
+a different account and region than anything else in the build.
+
+```yaml
+jobs:
+  build:
+    permissions:
+      id-token: write   # required to assume the pull role
+      contents: read
+    uses: truefoundry/github-workflows-public/.github/workflows/build.yml@main
+    with:
+      image_artifact_name: mlfoundry-server
+      image_tag: ${{ github.sha }}
+
+      # push to the private Artifactory repo
+      enable_jfrog: true
+      artifactory_registry_url: tfy.jfrog.io
+      artifactory_repository_url: tfy.jfrog.io/tfy-images
+
+      # pull base images from private ECR in account 111111111111
+      enable_private_ecr_pull: true
+      private_ecr_pull_registry: 111111111111.dkr.ecr.ap-south-1.amazonaws.com
+    secrets:
+      artifactory_username: ${{ secrets.ARTIFACTORY_USERNAME }}
+      artifactory_password: ${{ secrets.ARTIFACTORY_PASSWORD }}
+      private_ecr_pull_role_arn: ${{ secrets.PRIVATE_ECR_PULL_ROLE_ARN }}
+```
+
+The `FROM` line then references the pull registry directly:
+
+```dockerfile
+FROM 111111111111.dkr.ecr.ap-south-1.amazonaws.com/base/python:3.12
+```
+
+Both the ECR login and the Artifactory login run before the build steps, so base images
+in the Artifactory registry itself keep working the same way.
 
 **SBOM (Syft)**
 
