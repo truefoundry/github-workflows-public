@@ -49,6 +49,15 @@ on:
         description: 'Repository URL for AWS Public ECR e.g public.ecr.aws/your-alias/your-repo'
         required: false
         type: string
+      enable_private_ecr_pull:
+        description: 'Authenticate to a private AWS ECR registry before building so the Dockerfile can pull base images from it. Purely a pull credential: it does not change where the built image is pushed. Requires the private_ecr_pull_role_arn (or ecr_role_arn) secret and the calling job to grant id-token: write'
+        required: false
+        type: boolean
+        default: false
+      private_ecr_pull_registry:
+        description: 'Private AWS ECR registry host to authenticate against for pulling base images e.g 123456789012.dkr.ecr.us-east-1.amazonaws.com. Account ID and region are parsed from it, so the base image may live in a different AWS account and region than the rest of the build. Defaults to the default registry of the account owning private_ecr_pull_role_arn, in aws_ecr_region'
+        required: false
+        type: string
       enable_jfrog:
         description: 'Enable push to JFROG'
         required: false
@@ -64,7 +73,7 @@ on:
         required: false
         type: string
       aws_ecr_region:
-        description: 'AWS Public ECR region'
+        description: 'AWS region used for ECR (public ECR push and private ECR base-image pull)'
         required: false
         type: string
         default: 'us-east-1'
@@ -156,7 +165,10 @@ on:
         description: 'Password for JFrog Artifactory. Required if enable_jfrog is true'
         required: false
       ecr_role_arn:
-        description: 'Role ARN required to pull and push images to public ecr. Required if enable_public_ecr is true'
+        description: 'Role ARN required to pull and push images to public ecr. Required if enable_public_ecr is true. Also used as the fallback for private_ecr_pull_role_arn'
+        required: false
+      private_ecr_pull_role_arn:
+        description: 'Role ARN assumed to pull base images from private ECR. Required if enable_private_ecr_pull is true, unless ecr_role_arn is set'
         required: false
       checkout_token:
         description: 'Token used for checkout (required for private submodules)'
@@ -264,6 +276,49 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.ghcr_token || github.token }}
+
+      - name: Resolve private ECR pull registry
+        id: ecr_pull_target
+        if: ${{ inputs.enable_private_ecr_pull }}
+        env:
+          PULL_REGISTRY: ${{ inputs.private_ecr_pull_registry }}
+          DEFAULT_REGION: ${{ inputs.aws_ecr_region }}
+        run: |
+          set -euo pipefail
+
+          # A private ECR host is always <account-id>.dkr.ecr.<region>.amazonaws.com,
+          # so the account and region to authenticate against come from the host
+          # itself. That is what lets the base image live in another AWS account.
+          if [ -n "$PULL_REGISTRY" ]; then
+            host="${PULL_REGISTRY%%/*}"
+            if [[ ! "$host" =~ ^([0-9]{12})\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$ ]]; then
+              echo "Error: '$host' is not a private ECR registry host (<account-id>.dkr.ecr.<region>.amazonaws.com)" >&2
+              exit 1
+            fi
+            echo "Pull registry: account ${BASH_REMATCH[1]} in ${BASH_REMATCH[2]}"
+            echo "registry_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "region=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          else
+            # No explicit registry: use the default registry of the pull role's own account.
+            echo "registry_id=" >> "$GITHUB_OUTPUT"
+            echo "region=$DEFAULT_REGION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials for private ECR (pull base images)
+        if: ${{ inputs.enable_private_ecr_pull }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.private_ecr_pull_role_arn || secrets.ecr_role_arn }}
+          aws-region: ${{ steps.ecr_pull_target.outputs.region }}
+          # Assume this role straight from the GitHub OIDC token; without this any
+          # credentials exported by the public ECR step would be used as the source.
+          unset-current-credentials: true
+
+      - name: Log in to private Amazon ECR (pull base images)
+        if: ${{ inputs.enable_private_ecr_pull }}
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registries: ${{ steps.ecr_pull_target.outputs.registry_id }}
 
       - name: Build image for scanning
         uses: docker/build-push-action@v6
