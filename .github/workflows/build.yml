@@ -131,6 +131,11 @@ on:
         required: false
         type: boolean
         default: false
+      checkout_ref:
+        description: 'Branch, tag or SHA to build. Empty uses the caller run''s github.sha, which for a workflow_call is the CALLER''s commit - pass an explicit ref when the caller creates the commit it wants built.'
+        required: false
+        type: string
+        default: ''
       checkout_submodules:
         description: 'Whether to checkout git submodules: "true", "recursive", or "false"'
         required: false
@@ -211,6 +216,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          # Empty falls through to checkout's own default (the caller run's
+          # github.sha), so existing callers are unaffected.
+          ref: ${{ inputs.checkout_ref }}
           submodules: ${{ inputs.checkout_submodules }}
           fetch-depth: ${{ inputs.checkout_fetch_depth }}
           token: ${{ secrets.checkout_token || github.token }}
