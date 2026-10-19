@@ -1,0 +1,28 @@
+name: Test JFrog Image Push
+
+# Builds and pushes a real image to public JFrog Artifactory (OIDC).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'testdata/tfy-workflow-test/**'
+      - '.github/workflows/test-jfrog-push.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  push-jfrog:
+    uses: ./.github/workflows/build.yml
+    with:
+      enable_jfrog: true
+      enable_public_ecr: false
+      artifactory_registry_url: tfy.jfrog.io
+      artifactory_repository_url: tfy.jfrog.io/tfy-images
+      image_artifact_name: tfy-workflow-test
+      image_tag: test-${{ github.sha }}
+      dockerfile_path: testdata/tfy-workflow-test/Dockerfile
+      image_context: testdata/tfy-workflow-test
+      enable_scan: false
+      platforms: linux/amd64
