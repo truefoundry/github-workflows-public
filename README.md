@@ -50,6 +50,9 @@ check). Uses a registry-based build cache.
 ```yaml
 jobs:
   build:
+    permissions:
+      contents: read
+      id-token: write
     uses: truefoundry/github-workflows-public/.github/workflows/build.yml@main
     with:
       artifactory_registry_url: tfy.jfrog.io
@@ -58,9 +61,6 @@ jobs:
       image_tag: ${{ github.sha }}
       platforms: linux/amd64,linux/arm64
       enable_scan: true
-    secrets:
-      artifactory_username: ${{ secrets.ARTIFACTORY_USERNAME }}
-      artifactory_password: ${{ secrets.ARTIFACTORY_PASSWORD }}
 ```
 
 **Inputs**
@@ -95,12 +95,14 @@ jobs:
 | `sbom_artifact_name`                 | Name of the uploaded workflow artifact containing the SBOM and signatures | string  | false    | `sbom`                   |
 | `enable_sign`                        | Keyless (Sigstore) sign the image and SBOM with cosign; uploads `.sig`/`.pem`/`.payload`/`.sigstore.json` in the SBOM artifact. Requires the calling job to grant `id-token: write`; SBOM signing needs `enable_sbom: true` | boolean | false | `false` |
 
+**Authentication (JFrog OIDC)**
+
+JFrog auth uses GitHub OIDC via `jfrog/setup-jfrog-cli`. Calling jobs must grant `id-token: write` (and typically `contents: read`). No `artifactory_username` / `artifactory_password` secrets are required.
+
 **Secrets**
 
 | Name                   | Description                                              | Required                    |
 | ---------------------- | ------------------------------------------------------- | --------------------------- |
-| `artifactory_username` | Username for JFrog Artifactory                          | Required if `enable_jfrog`  |
-| `artifactory_password` | Password for JFrog Artifactory                          | Required if `enable_jfrog`  |
 | `ecr_role_arn`         | Role ARN to pull/push images to AWS Public ECR; also the fallback for `private_ecr_pull_role_arn` | Required if `enable_public_ecr` |
 | `private_ecr_pull_role_arn` | Role ARN assumed to pull base images from private ECR | Required if `enable_private_ecr_pull` (unless `ecr_role_arn` is set) |
 | `ghcr_token`           | Token to push to GHCR. Defaults to the caller's `GITHUB_TOKEN`; provide a PAT only to push to a different owner | Optional (with `enable_ghcr`) |
