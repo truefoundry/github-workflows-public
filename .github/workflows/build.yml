@@ -164,10 +164,10 @@ on:
         value: ${{ jobs.build.outputs.image_certificate_file_name }}
     secrets:
       artifactory_username:
-        description: 'Optional username for JFrog Artifactory. If set with artifactory_password, used instead of OIDC.'
+        description: 'Deprecated no-op. Kept optional so callers that still pass it do not fail. JFrog auth is OIDC-only.'
         required: false
       artifactory_password:
-        description: 'Optional password/token for JFrog Artifactory. If set with artifactory_username, used instead of OIDC.'
+        description: 'Deprecated no-op. Kept optional so callers that still pass it do not fail. JFrog auth is OIDC-only.'
         required: false
       ecr_role_arn:
         description: 'Role ARN required to pull and push images to public ecr. Required if enable_public_ecr is true. Also used as the fallback for private_ecr_pull_role_arn'
@@ -260,23 +260,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # secrets context cannot be used in step `if` on reusable workflows; detect mode in a run step.
-      - name: Determine JFrog auth mode
-        id: jfrog_auth
-        if: ${{ inputs.enable_jfrog }}
-        env:
-          ARTIFACTORY_USERNAME: ${{ secrets.artifactory_username }}
-          ARTIFACTORY_PASSWORD: ${{ secrets.artifactory_password }}
-        run: |
-          if [ -n "$ARTIFACTORY_USERNAME" ] && [ -n "$ARTIFACTORY_PASSWORD" ]; then
-            echo "mode=credentials" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=oidc" >> "$GITHUB_OUTPUT"
-          fi
-
+      # artifactory_username/password secrets are accepted but ignored (caller compatibility).
       - name: Setup JFrog CLI (OIDC)
         id: setup-jfrog-cli
-        if: ${{ inputs.enable_jfrog && steps.jfrog_auth.outputs.mode == 'oidc' }}
+        if: ${{ inputs.enable_jfrog }}
         uses: jfrog/setup-jfrog-cli@v4
         env:
           JF_URL: https://tfy.jfrog.io
@@ -288,8 +275,8 @@ jobs:
         uses: docker/login-action@v3
         if: ${{ inputs.enable_jfrog }}
         with:
-          username: ${{ secrets.artifactory_username || steps.setup-jfrog-cli.outputs.oidc-user }}
-          password: ${{ secrets.artifactory_password || steps.setup-jfrog-cli.outputs.oidc-token }}
+          username: ${{ steps.setup-jfrog-cli.outputs.oidc-user }}
+          password: ${{ steps.setup-jfrog-cli.outputs.oidc-token }}
           registry: ${{ inputs.artifactory_registry_url }}
 
       - name: configure aws credentials
