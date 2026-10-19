@@ -260,9 +260,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # secrets context cannot be used in step `if` on reusable workflows; detect mode in a run step.
+      - name: Determine JFrog auth mode
+        id: jfrog_auth
+        if: ${{ inputs.enable_jfrog }}
+        env:
+          ARTIFACTORY_USERNAME: ${{ secrets.artifactory_username }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.artifactory_password }}
+        run: |
+          if [ -n "$ARTIFACTORY_USERNAME" ] && [ -n "$ARTIFACTORY_PASSWORD" ]; then
+            echo "mode=credentials" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=oidc" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup JFrog CLI (OIDC)
         id: setup-jfrog-cli
-        if: ${{ inputs.enable_jfrog && secrets.artifactory_username == '' && secrets.artifactory_password == '' }}
+        if: ${{ inputs.enable_jfrog && steps.jfrog_auth.outputs.mode == 'oidc' }}
         uses: jfrog/setup-jfrog-cli@v4
         env:
           JF_URL: https://tfy.jfrog.io
