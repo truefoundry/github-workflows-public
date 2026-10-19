@@ -193,6 +193,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      packages: write
     outputs:
       sbom_artifact_name: ${{ (inputs.enable_sbom || inputs.enable_sign) && inputs.sbom_artifact_name || '' }}
       sbom_file_name: ${{ steps.sbom.outputs.file }}
