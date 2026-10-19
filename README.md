@@ -97,12 +97,14 @@ jobs:
 
 **Authentication (JFrog OIDC)**
 
-JFrog auth uses GitHub OIDC via `jfrog/setup-jfrog-cli`. Calling jobs must grant `id-token: write` (and typically `contents: read`). No `artifactory_username` / `artifactory_password` secrets are required.
+JFrog auth uses GitHub OIDC via `jfrog/setup-jfrog-cli`. Calling jobs must grant `id-token: write` (and typically `contents: read`). Prefer OIDC. Callers may still pass optional `artifactory_username` / `artifactory_password`; when both are set they are used instead of OIDC.
 
 **Secrets**
 
 | Name                   | Description                                              | Required                    |
 | ---------------------- | ------------------------------------------------------- | --------------------------- |
+| `artifactory_username` | Optional JFrog username (used with `artifactory_password` instead of OIDC) | No |
+| `artifactory_password` | Optional JFrog password/token (used with `artifactory_username` instead of OIDC) | No |
 | `ecr_role_arn`         | Role ARN to pull/push images to AWS Public ECR; also the fallback for `private_ecr_pull_role_arn` | Required if `enable_public_ecr` |
 | `private_ecr_pull_role_arn` | Role ARN assumed to pull base images from private ECR | Required if `enable_private_ecr_pull` (unless `ecr_role_arn` is set) |
 | `ghcr_token`           | Token to push to GHCR. Defaults to the caller's `GITHUB_TOKEN`; provide a PAT only to push to a different owner | Optional (with `enable_ghcr`) |
