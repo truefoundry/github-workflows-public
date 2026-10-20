@@ -174,12 +174,6 @@ on:
         description: 'File name of the Fulcio signing certificate (*.pem) for the image signature, inside the uploaded artifact. Empty when enable_sign is false.'
         value: ${{ jobs.build.outputs.image_certificate_file_name }}
     secrets:
-      artifactory_username:
-        description: 'Deprecated no-op. Kept optional so callers that still pass it do not fail. JFrog auth is OIDC-only.'
-        required: false
-      artifactory_password:
-        description: 'Deprecated no-op. Kept optional so callers that still pass it do not fail. JFrog auth is OIDC-only.'
-        required: false
       ecr_role_arn:
         description: 'Role ARN required to pull and push images to public ecr. Required if enable_public_ecr is true. Also used as the fallback for private_ecr_pull_role_arn'
         required: false
@@ -272,7 +266,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # artifactory_username/password secrets are accepted but ignored (caller compatibility).
       - name: Setup JFrog CLI (OIDC)
         id: setup-jfrog-cli
         if: ${{ inputs.enable_jfrog }}
