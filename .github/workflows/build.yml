@@ -13,6 +13,17 @@ on:
         description: 'Repository url for JFrog Artifactory e.g tfy.jfrog.io/tfy-images'
         required: false
         type: string
+      artifactory_oidc_provider_name:
+        description: >-
+          JFrog OIDC integration to authenticate against. Defaults to the
+          legacy org-wide integration, which issues a broadly-scoped identity.
+          Pass a scoped one -- github-jfrog-public, github-jfrog-internal,
+          github-jfrog-private, github-jfrog-private-read -- to get an
+          identity limited to the artifacts this repository actually
+          publishes. See jfrog/README.md in truefoundry/ubermold-truefoundry.
+        required: false
+        type: string
+        default: 'github-jfrog-oidc'
       image_artifact_name:
         description: 'Name of the image artifact, usually the repository name e.g mlfoundry-server'
         required: true
@@ -269,7 +280,7 @@ jobs:
         env:
           JF_URL: https://tfy.jfrog.io
         with:
-          oidc-provider-name: github-jfrog-oidc
+          oidc-provider-name: ${{ inputs.artifactory_oidc_provider_name }}
           oidc-audience: jfrog-github
 
       - name: Log in to JFrog Artifactory
