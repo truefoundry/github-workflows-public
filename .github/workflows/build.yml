@@ -74,6 +74,11 @@ on:
         required: false
         type: boolean
         default: true
+      enable_quay_push:
+        description: 'Also push the image to Quay after the JFrog push (best effort). Set to false to skip every Quay step'
+        required: false
+        type: boolean
+        default: true
       enable_ghcr:
         description: 'Enable push to GitHub Container Registry (ghcr.io)'
         required: false
@@ -201,6 +206,8 @@ jobs:
   build:
     name: Build and Push Image to Repository
     runs-on: ubuntu-latest
+    # Quay robot federation matches the OIDC subject exactly; this makes it repo:<repo>:environment:quay-push.
+    environment: quay-push
     permissions:
       contents: read
       id-token: write
@@ -543,6 +550,126 @@ jobs:
 
           echo "signature_file=${SIG_FILE}" >> "$GITHUB_OUTPUT"
           echo "certificate_file=${CERT_FILE}" >> "$GITHUB_OUTPUT"
+
+      # ============ Quay (best effort, after the JFrog push) ============
+      - name: Determine Quay target
+        id: quay_target
+        if: ${{ inputs.enable_jfrog && inputs.enable_quay_push }}
+        continue-on-error: true
+        env:
+          JFROG_REPOSITORY_URL: ${{ inputs.artifactory_repository_url }}
+          IMAGE_NAME: ${{ inputs.image_artifact_name }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          EXTRA_IMAGE_TAGS: ${{ inputs.extra_image_tag }}
+        run: |
+          case "$JFROG_REPOSITORY_URL" in
+            tfy.jfrog.io/tfy-images|tfy.jfrog.io/tfy-images/*) ORG=tfy-images ;;
+            tfy.jfrog.io/tfy-private-images|tfy.jfrog.io/tfy-private-images/*) ORG=tfy-private-images ;;
+            *) echo "No Quay target for ${JFROG_REPOSITORY_URL}; skipping Quay push."; exit 0 ;;
+          esac
+          SUBPATH="${JFROG_REPOSITORY_URL#tfy.jfrog.io/${ORG}}"
+          SUBPATH="${SUBPATH#/}"
+          REPO_PATH="${SUBPATH:+${SUBPATH}/}${IMAGE_NAME}"
+          QUAY_IMAGE="quay.io/${ORG}/${REPO_PATH}"
+          TAGS="${QUAY_IMAGE}:${IMAGE_TAG}"
+          while IFS= read -r line; do
+            line=$(echo "$line" | sed 's/^"//;s/"$//;s/ //g')
+            if [ -n "$line" ]; then
+              TAGS="${TAGS}"$'\n'"${QUAY_IMAGE}:${line}"
+            fi
+          done <<< "$EXTRA_IMAGE_TAGS"
+          {
+            echo "org=${ORG}"
+            echo "repo_path=${REPO_PATH}"
+            echo "robot=${ORG}+github-quay-push"
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Quay (OIDC)
+        id: quay_login
+        if: ${{ steps.quay_target.outputs.org != '' }}
+        continue-on-error: true
+        env:
+          ORG: ${{ steps.quay_target.outputs.org }}
+          ROBOT: ${{ steps.quay_target.outputs.robot }}
+          REPO_PATH: ${{ steps.quay_target.outputs.repo_path }}
+        run: |
+          warn() { echo "::warning title=Quay push skipped::$1"; echo "- Quay push skipped: $1" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+
+          GH_OIDC=$(curl -sf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=quay" | jq -r '.value // empty') || true
+          [ -n "$GH_OIDC" ] || warn "could not get a GitHub OIDC token"
+
+          QUAY_TOKEN=$(curl -sf -u "${ROBOT}:${GH_OIDC}" \
+            https://quay.io/oauth2/federation/robot/token | jq -r '.token // empty') || true
+          [ -n "$QUAY_TOKEN" ] || warn "Quay federation exchange failed for ${ROBOT} (subject repo:${GITHUB_REPOSITORY}:environment:quay-push)"
+          echo "::add-mask::${QUAY_TOKEN}"
+
+          echo "$QUAY_TOKEN" | docker login quay.io -u "$ROBOT" --password-stdin > /dev/null || warn "docker login to quay.io failed for ${ROBOT}"
+
+          REGISTRY_TOKEN=$(curl -sf -u "${ROBOT}:${QUAY_TOKEN}" \
+            "https://quay.io/v2/auth?service=quay.io&scope=repository:${ORG}/${REPO_PATH}:pull,push" | jq -r '.token // empty') || true
+          [ -n "$REGISTRY_TOKEN" ] || warn "could not get a registry token for ${ORG}/${REPO_PATH}"
+          echo "::add-mask::${REGISTRY_TOKEN}"
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${REGISTRY_TOKEN}" \
+            "https://quay.io/v2/${ORG}/${REPO_PATH}/tags/list") || true
+          [ "$STATUS" = "200" ] || warn "quay.io/${ORG}/${REPO_PATH} is missing or not accessible to ${ROBOT} (HTTP ${STATUS})"
+
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      # Same build inputs as the JFrog push, so every layer comes from the registry build cache.
+      - name: Push image to Quay
+        id: quay_push
+        if: ${{ steps.quay_login.outputs.ready == 'true' }}
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          provenance: ${{ inputs.enable_provenance }}
+          file: ${{ inputs.dockerfile_path }}
+          context: ${{ inputs.image_context }}
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ steps.quay_target.outputs.tags }}
+          cache-from: type=registry,ref=${{ steps.cache_registry.outputs.cache_ref }}
+          build-args: |
+            ${{ inputs.image_build_args }}
+            ${{ secrets.image_build_secrets }}
+
+      - name: Sign Quay image with Cosign
+        id: quay_sign
+        if: ${{ inputs.enable_sign && steps.quay_push.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          COSIGN_YES: 'true'
+          QUAY_IMAGE: quay.io/${{ steps.quay_target.outputs.org }}/${{ steps.quay_target.outputs.repo_path }}
+          QUAY_DIGEST: ${{ steps.quay_push.outputs.digest }}
+        run: cosign sign --yes "${QUAY_IMAGE}@${QUAY_DIGEST}"
+
+      - name: Quay push summary
+        if: ${{ steps.quay_login.outputs.ready == 'true' }}
+        continue-on-error: true
+        env:
+          TAGS: ${{ steps.quay_target.outputs.tags }}
+          PUSH_OUTCOME: ${{ steps.quay_push.outcome }}
+          SIGN_OUTCOME: ${{ steps.quay_sign.outcome }}
+        run: |
+          if [ "$SIGN_OUTCOME" = "failure" ]; then
+            echo "::warning title=Quay signing failed::The Quay image was pushed but not signed."
+            echo "- Quay image pushed but cosign signing failed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$PUSH_OUTCOME" = "success" ]; then
+            echo "### Pushed to Quay" >> "$GITHUB_STEP_SUMMARY"
+            while IFS= read -r tag; do
+              if [ -n "$tag" ]; then
+                echo "- \`${tag}\`" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            done <<< "$TAGS"
+          else
+            echo "::warning title=Quay push failed::Quay push failed; the JFrog push is unaffected."
+            echo "- Quay push failed; the JFrog push is unaffected." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Install Syft
         id: syft
