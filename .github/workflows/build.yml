@@ -573,7 +573,7 @@ jobs:
           QUAY_IMAGE="quay.io/${ORG}/${REPO_PATH}"
           TAGS="${QUAY_IMAGE}:${IMAGE_TAG}"
           while IFS= read -r line; do
-            line=$(echo "$line" | sed 's/^"//;s/"$//')
+            line=$(echo "$line" | sed 's/^"//;s/"$//;s/ //g')
             if [ -n "$line" ]; then
               TAGS="${TAGS}"$'\n'"${QUAY_IMAGE}:${line}"
             fi
