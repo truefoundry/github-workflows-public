@@ -11,9 +11,17 @@ on:
         description: "Allow document changes to be pushed to commit_ref"
         type: string
         default: "true"
+      runs_on:
+        description: >-
+          runs-on for the job, as JSON: a label string ('"ubuntu-latest"') or a
+          group object ('{"group":"public-runner-group","labels":"gh-pb-runners-2c"}').
+          Public repos need the allowlisted public runner to push docs back,
+          since the org IP allow list blocks pushes from standard runners.
+        type: string
+        default: '"ubuntu-latest"'
 jobs:
   terraform-module-readme-generator:
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runs_on) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
